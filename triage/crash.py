@@ -14,8 +14,8 @@ class Crash(object):
     Triage a crash using angr.
     '''
 
-    EIP_OVERWRITE    = "eip_overwrite"
-    EBP_OVERWRITE    = "ebp_overwrite"
+    IP_OVERWRITE    = "ip_overwrite"
+    BP_OVERWRITE    = "bp_overwrite"
     WRITE_WHAT_WHERE = "write_what_where"
     WRITE_X_WHERE    = "write_x_where"
 
@@ -71,22 +71,22 @@ class Crash(object):
         determine if the crash is exploitable
         '''
 
-        eip = self.state.regs.eip
-        ebp = self.state.regs.ebp
+        ip = self.state.regs.ip
+        bp = self.state.regs.bp
 
         # we assume a symbolic eip is always exploitable
-        if self.state.se.symbolic(eip):
+        if self.state.se.symbolic(ip):
             l.info("detected eip overwrite vulnerability")
-            self.crash_type = Crash.EIP_OVERWRITE
+            self.crash_type = Crash.IP_OVERWRITE
 
             return True
 
         # XXX
         # not sure how easily exploitable this will be unless they start
         # using the leave instruction
-        if self.state.se.symbolic(ebp):
+        if self.state.se.symbolic(bp):
             l.info("detected ebp overwrite vulnerability")
-            self.crash_type = Crash.EBP_OVERWRITE
+            self.crash_type = Crash.BP_OVERWRITE
 
             return True
 
