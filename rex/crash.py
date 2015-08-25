@@ -1,6 +1,6 @@
 import logging
 
-l = logging.getLogger("triage.Triage")
+l = logging.getLogger("rex.Crash")
 
 import angr
 import tracer
