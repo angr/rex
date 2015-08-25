@@ -12,10 +12,12 @@ class Crash(object):
     Triage a crash using angr.
     '''
 
-    IP_OVERWRITE    = "ip_overwrite"
-    BP_OVERWRITE    = "bp_overwrite"
-    WRITE_WHAT_WHERE = "write_what_where"
-    WRITE_X_WHERE    = "write_x_where"
+    IP_OVERWRITE         = "ip_overwrite"
+    PARTIAL_IP_OVERWRITE = "partial_ip_overwrite"
+    BP_OVERWRITE         = "bp_overwrite"
+    PARTIAL_BP_OVERWRITE = "partial_bp_overwrite"
+    WRITE_WHAT_WHERE     = "write_what_where"
+    WRITE_X_WHERE        = "write_x_where"
 
     def __init__(self, binary, crash):
         '''
@@ -74,8 +76,13 @@ class Crash(object):
 
         # we assume a symbolic eip is always exploitable
         if self.state.se.symbolic(ip):
-            l.info("detected ip overwrite vulnerability")
-            self.crash_type = Crash.IP_OVERWRITE
+            # how much control of ip do we have?
+            if self._symbolic_control(ip) == self.state.arch.bits:
+                l.info("detected ip overwrite vulnerability")
+                self.crash_type = Crash.IP_OVERWRITE
+            else:
+                l.info("detected partial ip overwrite vulnerability")
+                self.crash_type = Crash.PARTIAL_IP_OVERWRITE
 
             return True
 
@@ -83,12 +90,17 @@ class Crash(object):
         # not sure how easily exploitable this will be unless they start
         # using the leave instruction
         if self.state.se.symbolic(bp):
-            l.info("detected bp overwrite vulnerability")
-            self.crash_type = Crash.BP_OVERWRITE
+            # how much control of bp do we have
+            if self._symbolic_control(bp) == self.state.arch.bits:
+                l.info("detected bp overwrite vulnerability")
+                self.crash_type = Crash.BP_OVERWRITE
+            else:
+                l.info("detected partial bp overwrite vulnerability")
+                self.crash_type = Crash.PARTIAL_BP_OVERWRITE
 
             return True
 
-        # if nothing painfully obvious is symbolic let's look at actions
+        # if nothing obvious is symbolic let's look at actions
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
@@ -134,3 +146,19 @@ class Crash(object):
                 control[sp] = addr + self.symbolic_mem[addr] - sp
 
         return control
+
+    def _symbolic_control(self, ast):
+        '''
+        determine the amount of symbolic bits in an ast, useful to determining how much control we have
+        over registers
+        '''
+
+        sbits = 0
+
+        # XXX assumes variables will always obey the same naming convention
+        # the variable's bit size must be the string after the final '_' character
+        for var in ast.variables:
+            idx = var.rindex("_")
+            sbits += int(var[idx+1:])
+
+        return sbits
