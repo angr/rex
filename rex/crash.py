@@ -2,9 +2,7 @@ import logging
 
 l = logging.getLogger("rex.Crash")
 
-import angr
 import tracer
-from IPython import embed
 
 class TriageNonCrashingInput(Exception):
     pass
@@ -51,19 +49,19 @@ class Crash(object):
         # crash type
         self.crash_type = None
 
-        self.symbolic_mem = { } 
+        self.symbolic_mem = { }
 
         for act in prev.actions:
             if act.type == "mem" and act.action == "write":
                 what = act.data.ast
                 if not (isinstance(what, int) or isinstance(what, long)):
-                    if self.state.se.symbolic(what): 
+                    if self.state.se.symbolic(what):
                         what_l = len(what) / 8
                         if self.state.se.symbolic(act.addr.ast):
                             l.warning("symbolic write target address is symbolic")
                         target = self.state.se.any_int(act.addr.ast)
                         if target not in self.symbolic_mem or (self.symbolic_mem[target] + what_l) > self.symbolic_mem[target]:
-                            self.symbolic_mem[target] = what_l 
+                            self.symbolic_mem[target] = what_l
 
 ### EXPOSED
     def exploitable(self):
@@ -76,7 +74,7 @@ class Crash(object):
 
         # we assume a symbolic eip is always exploitable
         if self.state.se.symbolic(ip):
-            l.info("detected eip overwrite vulnerability")
+            l.info("detected ip overwrite vulnerability")
             self.crash_type = Crash.IP_OVERWRITE
 
             return True
@@ -85,7 +83,7 @@ class Crash(object):
         # not sure how easily exploitable this will be unless they start
         # using the leave instruction
         if self.state.se.symbolic(bp):
-            l.info("detected ebp overwrite vulnerability")
+            l.info("detected bp overwrite vulnerability")
             self.crash_type = Crash.BP_OVERWRITE
 
             return True
@@ -93,7 +91,7 @@ class Crash(object):
         # if nothing painfully obvious is symbolic let's look at actions
 
         # grab the all actions in the last basic block
-        symbolic_actions = [ ] 
+        symbolic_actions = [ ]
         for a in self.state.log.actions:
             if a.type == 'mem':
                 if self.state.se.symbolic(a.addr):
@@ -101,7 +99,7 @@ class Crash(object):
 
         for sym_action in symbolic_actions:
             if sym_action.action == "write":
-                if self.state.se.symbolic(sym_action.data):  
+                if self.state.se.symbolic(sym_action.data):
                     l.info("detected write-what-where vulnerability")
                     self.crash_type = Crash.WRITE_WHAT_WHERE
                 else:
@@ -119,7 +117,7 @@ class Crash(object):
         determine what symbolic memory we control equal to or beneath sp
         '''
 
-        control = { } 
+        control = { }
 
         if self.state.se.symbolic(self.state.regs.sp):
             l.warning("detected symbolic sp when guaging stack control")
