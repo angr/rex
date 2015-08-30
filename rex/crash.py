@@ -3,6 +3,8 @@ import logging
 l = logging.getLogger("rex.Crash")
 
 import tracer
+from rex.exploit import Exploit, CannotExploit
+from rex.vulnerability import Vulnerability
 
 class TriageNonCrashingInput(Exception):
     pass
@@ -11,13 +13,6 @@ class Crash(object):
     '''
     Triage a crash using angr.
     '''
-
-    IP_OVERWRITE         = "ip_overwrite"
-    PARTIAL_IP_OVERWRITE = "partial_ip_overwrite"
-    BP_OVERWRITE         = "bp_overwrite"
-    PARTIAL_BP_OVERWRITE = "partial_bp_overwrite"
-    WRITE_WHAT_WHERE     = "write_what_where"
-    WRITE_X_WHERE        = "write_x_where"
 
     def __init__(self, binary, crash):
         '''
@@ -79,10 +74,10 @@ class Crash(object):
             # how much control of ip do we have?
             if self._symbolic_control(ip) == self.state.arch.bits:
                 l.info("detected ip overwrite vulnerability")
-                self.crash_type = Crash.IP_OVERWRITE
+                self.crash_type = Vulnerability.IP_OVERWRITE
             else:
                 l.info("detected partial ip overwrite vulnerability")
-                self.crash_type = Crash.PARTIAL_IP_OVERWRITE
+                self.crash_type = Vulnerability.PARTIAL_IP_OVERWRITE
 
             return True
 
@@ -93,10 +88,10 @@ class Crash(object):
             # how much control of bp do we have
             if self._symbolic_control(bp) == self.state.arch.bits:
                 l.info("detected bp overwrite vulnerability")
-                self.crash_type = Crash.BP_OVERWRITE
+                self.crash_type = Vulnerability.BP_OVERWRITE
             else:
                 l.info("detected partial bp overwrite vulnerability")
-                self.crash_type = Crash.PARTIAL_BP_OVERWRITE
+                self.crash_type = Vulnerability.PARTIAL_BP_OVERWRITE
 
             return True
 
@@ -113,14 +108,28 @@ class Crash(object):
             if sym_action.action == "write":
                 if self.state.se.symbolic(sym_action.data):
                     l.info("detected write-what-where vulnerability")
-                    self.crash_type = Crash.WRITE_WHAT_WHERE
+                    self.crash_type = Vulnerability.WRITE_WHAT_WHERE
                 else:
                     l.info("detected write-x-where vulnerability")
-                    self.crash_type = Crash.WRITE_X_WHERE
+                    self.crash_type = Vulnerability.WRITE_X_WHERE
 
                 return True
 
         return False
+
+    def exploit(self):
+        '''
+        craft an exploit for a crash
+        '''
+
+        # if this crash hasn't been classified, classify it now
+        if self.crash_type == None:
+            if not self.exploitable():
+                raise CannotExploit
+
+        exploit = Exploit(self)
+        exploit.initialize()
+        return exploit
 
 ### UTIL
 
