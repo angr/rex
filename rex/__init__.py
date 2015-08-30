@@ -1,2 +1,2 @@
-from crash import Crash
-from exploit import Exploit
+from rex.crash import Crash
+from rex.exploit import Exploit, CannotExploit
