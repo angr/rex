@@ -6,7 +6,7 @@ import tracer
 from rex.exploit import Exploit, CannotExploit
 from rex.vulnerability import Vulnerability
 
-class TriageNonCrashingInput(Exception):
+class NonCrashingInput(Exception):
     pass
 
 class Crash(object):
@@ -27,13 +27,13 @@ class Crash(object):
 
         if not self.tracer.crash_mode:
             l.error("input provided did not cause a crash in %s", binary)
-            raise TriageNonCrashingInput
+            raise NonCrashingInput
 
         # run the tracer, grabbing the crash state
         t_result = self.tracer.run()
         if not isinstance(t_result, tuple):
             l.warning("TODO unable to analyze crash because angr deadended")
-            raise TriageNonCrashingInput
+            raise NonCrashingInput
 
         prev, state = t_result
 
