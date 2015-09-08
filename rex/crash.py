@@ -4,8 +4,9 @@ l = logging.getLogger("rex.Crash")
 
 import angr
 import tracer
-from rex.exploit import Exploit, CannotExploit
+from rex.exploit import CannotExploit
 from rex.exploit.cgc import CGCExploit
+from rex.exploit.linux import LinuxExploit
 from rex.vulnerability import Vulnerability
 
 class NonCrashingInput(Exception):
@@ -133,6 +134,8 @@ class Crash(object):
         os = self._p.loader.main_bin.os
         if os == "cgc":
             exploit = CGCExploit(self)
+        elif os == "unix":
+            exploit = LinuxExploit(self)
         else:
             raise CannotExploit("unimplemented OS")
 
