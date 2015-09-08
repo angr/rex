@@ -2,8 +2,10 @@ import logging
 
 l = logging.getLogger("rex.Crash")
 
+import angr
 import tracer
 from rex.exploit import Exploit, CannotExploit
+from rex.exploit.cgc import CGCExploit
 from rex.vulnerability import Vulnerability
 
 class NonCrashingInput(Exception):
@@ -23,6 +25,7 @@ class Crash(object):
         self.binary = binary
         self.crash  = crash
 
+        self._p = angr.Project(binary)
         self.tracer = tracer.Tracer(binary, crash)
 
         if not self.tracer.crash_mode:
@@ -127,34 +130,16 @@ class Crash(object):
             if not self.exploitable():
                 raise CannotExploit
 
-        exploit = Exploit(self)
+        os = self._p.loader.main_bin.os
+        if os == "cgc":
+            exploit = CGCExploit(self)
+        else:
+            raise CannotExploit("unimplemented OS")
+
         exploit.initialize()
         return exploit
 
 ### UTIL
-
-    def stack_control(self):
-        '''
-        determine what symbolic memory we control equal to or beneath sp
-        '''
-
-        control = { }
-
-        if self.state.se.symbolic(self.state.regs.sp):
-            l.warning("detected symbolic sp when guaging stack control")
-            return control
-
-        sp = self.state.se.any_int(self.state.regs.sp)
-        for addr in self.symbolic_mem:
-            # if the region is above sp it gets added
-            if addr > sp:
-                control[addr] = self.symbolic_mem[addr]
-
-            # if sp falls into the region it gets added starting at sp
-            if sp <= addr + self.symbolic_mem[addr]:
-                control[sp] = addr + self.symbolic_mem[addr] - sp
-
-        return control
 
     def _symbolic_control(self, ast):
         '''
