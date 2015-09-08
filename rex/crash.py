@@ -52,6 +52,8 @@ class Crash(object):
 
         self.symbolic_mem = { }
 
+
+        region_tails = { }
         for act in prev.actions:
             if act.type == "mem" and act.action == "write":
                 what = act.data.ast
@@ -61,8 +63,17 @@ class Crash(object):
                         if self.state.se.symbolic(act.addr.ast):
                             l.warning("symbolic write target address is symbolic")
                         target = self.state.se.any_int(act.addr.ast)
-                        if target not in self.symbolic_mem or (self.symbolic_mem[target] + what_l) > self.symbolic_mem[target]:
+                        if target in region_tails:
+                            region_key = region_tails[target]
+                            while region_key not in self.symbolic_mem:
+                                region_key = region_tails[region_key]
+                            self.symbolic_mem[region_key] += what_l
+                        elif (target + what_l) in self.symbolic_mem:
+                            self.symbolic_mem[target] = what_l + self.symbolic_mem[target + what_l]
+                        elif target not in self.symbolic_mem or (self.symbolic_mem[target] + what_l) > self.symbolic_mem[target]:
                             self.symbolic_mem[target] = what_l
+
+                        region_tails[target + what_l] = target
 
 ### EXPOSED
     def exploitable(self):
