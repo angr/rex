@@ -132,7 +132,7 @@ class Crash(object):
 
         return False
 
-    def exploit(self):
+    def exploit(self, **kwargs):
         '''
         craft an exploit for a crash
         '''
@@ -144,9 +144,9 @@ class Crash(object):
 
         os = self._p.loader.main_bin.os
         if os == "cgc":
-            exploit = CGCExploit(self)
+            exploit = CGCExploit(self, **kwargs)
         elif os == "unix":
-            exploit = LinuxExploit(self)
+            exploit = LinuxExploit(self, **kwargs)
         else:
             raise CannotExploit("unimplemented OS")
 
