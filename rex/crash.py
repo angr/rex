@@ -90,7 +90,7 @@ class Crash(object):
         if os == "cgc":
             exploit = CGCExploit(self, **kwargs)
         else:
-            exploit = ExploitFactory(self)
+            exploit = ExploitFactory(self, **kwargs)
 
         exploit.initialize()
         return exploit
