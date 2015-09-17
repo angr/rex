@@ -28,7 +28,7 @@ class Crash(object):
         self.project = angr.Project(binary)
 
         # run the tracer, grabbing the crash state
-        prev, crash_state = tracer.Tracer(binary, crash).run()
+        prev, crash_state = tracer.Tracer(binary, crash, resiliency=False).run()
         if crash_state is None:
             l.warning("input did not cause a crash")
             raise NonCrashingInput
