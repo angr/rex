@@ -5,8 +5,8 @@ setup(
       version='0.01',
       packages=['rex', 'rex.exploit', 'rex.exploit.cgc', 'rex.exploit.cgc.payload', 'rex.exploit.techniques', 'rex.exploit.shellcodes'],
       dependency_links=[
-            'git+ssh://git@git.seclab.cs.ucsb.edu:/cgc/tracer.git#egg=tracer-0.1',
-            'git+ssh://git@git.seclab.cs.ucsb.edu:/angr/angrop.git#egg=angrop-1.0',
+            'git+ssh://git@git.seclab.cs.ucsb.edu/cgc/tracer.git#egg=tracer-0.1',
+            'git+ssh://git@git.seclab.cs.ucsb.edu/angr/angrop.git#egg=angrop-1.0',
       ],
       install_requires=[
             'angr',
