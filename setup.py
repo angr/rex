@@ -7,6 +7,10 @@ setup(
       install_requires=[
             'angr',
             'simuvex',
+            'tracer',
+            'angrop',
+      ],
+      dependency_links=[
             'git+ssh://git@git.seclab.cs.ucsb.edu:/cgc/tracer.git#egg=tracer',
             'git+ssh://git@git.seclab.cs.ucsb.edu:/angr/angrop.git#egg=angrop',
       ],
