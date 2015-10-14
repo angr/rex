@@ -1,12 +1,16 @@
 from distutils.core import setup
 import subprocess
 
-import pip
-r = pip.req.RequirementSet(pip.locations.build_prefix, pip.locations.src_prefix, download_dir=None)
-r.add_requirement(pip.req.InstallRequirement.from_line('git+ssh://git@git.seclab.cs.ucsb.edu:/angr/angrop.git#egg=angrop'))
-r.add_requirement(pip.req.InstallRequirement.from_line('git+ssh://git@git.seclab.cs.ucsb.edu:/cgc/tracer.git#egg=tracer'))
-r.prepare_files(pip.index.PackageFinder([], None))
-r.install([], [])
+TRACER_URL = 'git+ssh://git@git.seclab.cs.ucsb.edu:/cgc/tracer.git#egg=tracer'
+ANGROP_URL = 'git+ssh://git@git.seclab.cs.ucsb.edu:/angr/angrop.git#egg=angrop'
+
+# this is really gross, but you do what you gotta do
+if subprocess.call(['pip', 'install', TRACER_URL]) != 0:
+    raise LibError("Unable to install tracer")
+
+if subprocess.call(['pip', 'install', ANGROP_URL]) != 0:
+    raise LibError("Unable to install angrop")
+
 
 setup(
       name='rex',
