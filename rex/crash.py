@@ -87,10 +87,7 @@ class Crash(object):
                 raise CannotExploit
 
         os = self.project.loader.main_bin.os
-        if os == "cgc":
-            exploit = CGCExploit(self, **kwargs)
-        else:
-            exploit = ExploitFactory(self, **kwargs)
+        exploit = ExploitFactory(self, **kwargs)
 
         exploit.initialize()
         return exploit
