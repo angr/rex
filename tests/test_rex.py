@@ -1,6 +1,5 @@
 import rex
 import nose
-import tracer
 
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
