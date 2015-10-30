@@ -15,18 +15,16 @@ def test_cgc_type1_rop_stacksmash():
     crash = rex.Crash(os.path.join(bin_location, "cgc_scored_event_1/cgc/0b32aa01_01"), crash.decode('hex'))
     exploit = crash.exploit()
 
-    exploit_master = exploit.arsenal['rop_set_register']
-
     # make sure we can control ecx, edx, ebx, ebp, esi, and edi with rop
-    nose.tools.assert_true(exploit_master.can_control('ecx'))
-    nose.tools.assert_true(exploit_master.can_control('edx'))
-    nose.tools.assert_true(exploit_master.can_control('ebx'))
-    nose.tools.assert_true(exploit_master.can_control('ebp'))
-    nose.tools.assert_true(exploit_master.can_control('esi'))
-    nose.tools.assert_true(exploit_master.can_control('edi'))
+    nose.tools.assert_true(exploit.can_control('ecx'))
+    nose.tools.assert_true(exploit.can_control('edx'))
+    nose.tools.assert_true(exploit.can_control('ebx'))
+    nose.tools.assert_true(exploit.can_control('ebp'))
+    nose.tools.assert_true(exploit.can_control('esi'))
+    nose.tools.assert_true(exploit.can_control('edi'))
 
     # make sure our ecx chain actually works (ecx is chosen arbitrarily)
-    ecx_exploit = exploit_master.register_mapping['ecx']
+    ecx_exploit = exploit.register_setters['ecx']
 
     c_str = ecx_exploit._chain.payload_str(constraints=(ecx_exploit._value_var==0x50495a41))
     c_bvv = ecx_exploit.crash.state.se.BVV(c_str)

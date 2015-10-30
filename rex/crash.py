@@ -4,7 +4,7 @@ l = logging.getLogger("rex.Crash")
 
 import angr
 import tracer
-from rex.exploit import ExploitFactory, CannotExploit
+from rex.exploit import CannotExploit, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
 
 class NonCrashingInput(Exception):
@@ -85,7 +85,12 @@ class Crash(object):
         if not self.exploitable():
                 raise CannotExploit
 
-        exploit = ExploitFactory(self, **kwargs)
+        os = self.project.loader.main_bin.os
+
+        if os == 'cgc':
+            exploit = CGCExploitFactory(self, **kwargs)
+        else:
+            exploit = ExploitFactory(self, **kwargs)
 
         exploit.initialize()
         return exploit
