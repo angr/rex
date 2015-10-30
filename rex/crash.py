@@ -15,16 +15,29 @@ class Crash(object):
     Triage a crash using angr.
     '''
 
-    def __init__(self, binary, crash):
+    def __init__(self, binary, crash, aslr=None):
         '''
         :param binary: path to the binary which crashed
         :param crash: string of input which crashed the binary
+        :param stack_base: option base address of the stack, if none is specified this will either be infered or left as
+            None, depending on the platform
         '''
 
         self.binary = binary
         self.crash  = crash
 
         self.project = angr.Project(binary)
+
+        # determine the aslr of a given os and arch
+        # TODO set sp to user controlled stackbase before tracing
+        if aslr is None:
+            os = self.project.loader.main_bin.os
+            if os == "cgc": # cgc has no ASLR, but we don't assume a stackbase
+                self.aslr = False
+            else: # we assume linux is going to enfore stackbased aslr
+                self.aslr = True
+        else:
+            self.aslr = aslr
 
         # run the tracer, grabbing the crash state
         prev, crash_state = tracer.Tracer(binary, crash, resiliency=False).run()
