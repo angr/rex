@@ -1,5 +1,5 @@
-* CGCROP
-    1. state aware rop gadget finder, won't set functions which are already controlled
+* State-Aware ROP
+    1. state aware rop gadget finder, won't set arguments which are already controlled
     1. can identify libcgc functions which are helpful for chain building
 
 * Improvements
@@ -7,5 +7,6 @@
        an unconstrained successor
     1. detect actual stack smashing more easily to avoid using 'stack changing gadgets' which only do a 'ret'
 
-* Testcases
-    1. test CGC binaries with known exploitable conditions and make sure they return full_control
+* Basics
+    1. CGC binaries can call shellcode to set registers and leak addresses
+    1. CGC exploit factory gives priority to exploits which bypass NX and ASLR
