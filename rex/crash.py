@@ -51,9 +51,7 @@ class Crash(object):
         # the state at crash time
         self.state  = crash_state
 
-        self.symbolic_mem = { }
-
-        region_tails = { }
+        memory_writes = [ ]
         for act in prev.actions:
             if act.type == "mem" and act.action == "write":
                 what = act.data.ast
@@ -63,17 +61,28 @@ class Crash(object):
                         if self.state.se.symbolic(act.addr.ast):
                             l.warning("symbolic write target address is symbolic")
                         target = self.state.se.any_int(act.addr.ast)
-                        if target in region_tails:
-                            region_key = region_tails[target]
-                            while region_key not in self.symbolic_mem:
-                                region_key = region_tails[region_key]
-                            self.symbolic_mem[region_key] += what_l
-                        elif target + what_l in self.symbolic_mem:
-                            self.symbolic_mem[target] = what_l + self.symbolic_mem[target + what_l]
-                        elif target not in self.symbolic_mem or (self.symbolic_mem[target] + what_l) > self.symbolic_mem[target]:
-                            self.symbolic_mem[target] = what_l
 
-                        region_tails[target + what_l] = target
+                        memory_writes.append((target, what_l))
+
+        self.symbolic_mem = { }
+
+        memory_writes = sorted(memory_writes, key=lambda x: x[0])
+        write_i = 0
+        while write_i < len(memory_writes) - 1:
+
+            current_w, current_len = memory_writes[write_i]
+            current_end_w = current_w + current_len
+            self.symbolic_mem[current_w] = current_len
+
+            next_w, next_len = memory_writes[write_i + 1]
+            next_end_w = next_w + next_len
+            if current_end_w >= next_w: # does the next address start in an existing region?
+                if not next_end_w <= current_end_w: # does the next region not end inside the existing region?
+                    self.symbolic_mem[current_w] = next_end_w - current_w
+
+                write_i += 1
+
+            write_i += 1
 
         # crash type
         self.crash_type = None
