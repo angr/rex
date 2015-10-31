@@ -2,6 +2,6 @@ before_script:
     - angr-test sync hard
 
 angrop:
-    script: "angr-test angrop"
+    script: "angr-test rex"
     tags:
         - "angr"
