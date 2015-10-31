@@ -4,6 +4,24 @@ import nose
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 
+def test_linux_stacksmash():
+    '''
+    Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
+    ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
+    '''
+
+    crash = "A" * 227
+    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash)
+    exploit = crash.exploit()
+
+    # make sure we're able to exploit it in all possible ways
+    nose.tools.assert_equal(len(exploit.arsenal), 3)
+    nose.tools.assert_true('rop_to_system' in exploit.arsenal)
+    nose.tools.assert_true('call_shellcode' in exploit.arsenal)
+    nose.tools.assert_true('call_jmp_sp_shellcode' in exploit.arsenal)
+
+    # TODO test exploit with pwntool's 'process'
+
 def test_cgc_type1_rop_stacksmash():
     '''
     Test creation of type1 exploit on 0b32aa01_01 ('Palindrome') with rop. The vulnerability exposed by the string `crash` is
