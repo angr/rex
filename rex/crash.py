@@ -30,7 +30,6 @@ class Crash(object):
         self.os = self.project.loader.main_bin.os
 
         # determine the aslr of a given os and arch
-        # TODO set sp to user controlled stackbase before tracing
         if aslr is None:
             if self.os == "cgc": # cgc has no ASLR, but we don't assume a stackbase
                 self.aslr = False
@@ -120,6 +119,8 @@ class Crash(object):
         cp.binary = self.binary
         cp.crash = self.crash
         cp.project = self.project
+        cp.os = self.os
+        cp.aslr = self.aslr
         cp.prev = self.prev.copy()
         cp.state = self.state.copy()
         cp.symbolic_mem = self.symbolic_mem.copy()
