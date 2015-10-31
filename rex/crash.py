@@ -27,12 +27,12 @@ class Crash(object):
         self.crash  = crash
 
         self.project = angr.Project(binary)
+        self.os = self.project.loader.main_bin.os
 
         # determine the aslr of a given os and arch
         # TODO set sp to user controlled stackbase before tracing
         if aslr is None:
-            os = self.project.loader.main_bin.os
-            if os == "cgc": # cgc has no ASLR, but we don't assume a stackbase
+            if self.os == "cgc": # cgc has no ASLR, but we don't assume a stackbase
                 self.aslr = False
             else: # we assume linux is going to enfore stackbased aslr
                 self.aslr = True
@@ -98,9 +98,7 @@ class Crash(object):
         if not self.exploitable():
                 raise CannotExploit
 
-        os = self.project.loader.main_bin.os
-
-        if os == 'cgc':
+        if self.os == 'cgc':
             exploit = CGCExploitFactory(self, **kwargs)
         else:
             exploit = ExploitFactory(self, **kwargs)
