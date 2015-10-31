@@ -9,4 +9,7 @@
 
 * Basics
     1. CGC binaries can call shellcode to set registers and leak addresses
+    1. When calling shellcode see if any registers are pointing to our payload, if so call those registers with gadgets
+    1. Need a way of querying if a page is executable
     1. CGC exploit factory gives priority to exploits which bypass NX and ASLR
+
