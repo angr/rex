@@ -7,6 +7,9 @@
        an unconstrained successor
     1. detect actual stack smashing more easily to avoid using 'stack changing gadgets' which only do a 'ret'
 
+* Testcases
+    1. testcases to test dumped exploit scripts
+
 * Basics
     1. Generate Type 2 exploits for binaries
     1. When calling shellcode see if any registers are pointing to our payload, if so call those registers with gadgets
