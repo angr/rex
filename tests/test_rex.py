@@ -4,6 +4,8 @@ import nose
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 
+CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ","").decode('hex')
+
 def test_linux_stacksmash():
     '''
     Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
@@ -62,6 +64,30 @@ def test_cgc_type1_rop_stacksmash():
     nose.tools.assert_equal(ecx_val, "PIZA")
 
     # TODO test circumstantial and shellcode setters
+
+    # make sure our leaker exploits writes out the contents
+    leaker_exploit = exploit.best_type2
+
+    # leak the memory at the binary's base address
+    c_str = leaker_exploit._chain.payload_str(constraints=(leaker_exploit._addr_var==0x8048000))
+    c_bvv = leaker_exploit.crash.state.se.BVV(c_str)
+
+    c_mem = leaker_exploit.crash.state.memory.load(leaker_exploit._chain_addr, len(c_str))
+    leaker_exploit.crash.state.add_constraints(c_mem == c_bvv)
+
+    exploited_state = leaker_exploit._windup_state(leaker_exploit.crash.state, to_syscall=True)
+    exploited_state.add_constraints(exploited_state.regs.eax == 2)
+    exploited_state.add_constraints(exploited_state.regs.ebx == 1)
+    exploited_state.add_constraints(exploited_state.regs.ecx == 0x8048000)
+    exploited_state.add_constraints(exploited_state.regs.edx == 0x1000)
+    exploited_state.add_constraints(exploited_state.regs.esi == 0)
+
+    ss = leaker_exploit._windup_state(exploited_state)
+
+    leaked = ss.posix.dumps(1)
+    leak_start = leaked.find("\x7fCGC")
+    leaked_header = leaked[leak_start:leak_start+0x10]
+    nose.tools.assert_equals(leaked_header, CGC_HEADER)
 
 def run_all():
     functions = globals()
