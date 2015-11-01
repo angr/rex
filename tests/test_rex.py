@@ -40,6 +40,8 @@ def test_cgc_type1_rop_stacksmash():
     nose.tools.assert_true(exploit.can_control('ebp'))
     nose.tools.assert_true(exploit.can_control('esi'))
     nose.tools.assert_true(exploit.can_control('edi'))
+    nose.tools.assert_true(exploit.can_control('eax'))
+    nose.tools.assert_true(exploit.can_control('esp'))
 
     # make sure our ecx chain actually works (ecx is chosen arbitrarily)
     ecx_exploit = exploit.register_setters['ecx']
@@ -58,6 +60,8 @@ def test_cgc_type1_rop_stacksmash():
 
     ecx_val = exploited_ecx_vals[0]
     nose.tools.assert_equal(ecx_val, "PIZA")
+
+    # TODO test circumstantial and shellcode setters
 
 def run_all():
     functions = globals()
