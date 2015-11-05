@@ -15,7 +15,7 @@ import subprocess
 setup(
       name='rex',
       version='0.01',
-      packages=['rex', 'rex.exploit', 'rex.exploit.cgc', 'rex.exploit.cgc.payload', 'rex.exploit.techniques', 'rex.exploit.shellcodes'],
+      packages=['rex', 'rex.exploit', 'rex.exploit.cgc', 'rex.exploit.techniques', 'rex.exploit.shellcodes'],
       install_requires=[
             'angr',
             'simuvex',
