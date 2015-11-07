@@ -7,6 +7,7 @@
        an unconstrained successor
     1. detect actual stack smashing more easily to avoid using 'stack changing gadgets' which only do a 'ret'
     1. the fourth argument to CGC's transmit system call can be the address of an writeable page, let's support this
+    1. Use reverse memory name map instead of constructing the the symbolic memory map in the Crash constructor
 
 * Testcases
     1. testcases to test dumped exploit scripts
