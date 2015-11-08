@@ -2,10 +2,13 @@ import logging
 
 l = logging.getLogger("rex.Crash")
 
+import os
 import angr
+import angrop
 import tracer
 from rex.exploit import CannotExploit, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
+from simuvex import s_options as so
 
 class NonCrashingInput(Exception):
     pass
@@ -27,6 +30,17 @@ class Crash(object):
         self.crash  = crash
 
         self.project = angr.Project(binary)
+
+        # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
+        rop_cache_path = os.path.join("/tmp", "%s-rop" % os.path.basename(self.binary))
+        self.rop = self.project.analyses.ROP()
+        if os.path.exists(rop_cache_path):
+            l.info("loading rop gadgets from cache '%s'", rop_cache_path)
+            self.rop.load_gadgets(rop_cache_path)
+        else:
+            self.rop.find_gadgets()
+            self.rop.save_gadgets(rop_cache_path)
+
         self.os = self.project.loader.main_bin.os
 
         # determine the aslr of a given os and arch
@@ -39,52 +53,63 @@ class Crash(object):
             self.aslr = aslr
 
         # run the tracer, grabbing the crash state
-        prev, crash_state = tracer.Tracer(binary, crash, resiliency=False).run()
+        remove_options = {so.TRACK_MEMORY_ACTIONS, so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
+                so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.TRACK_ACTION_HISTORY}
+        add_options = {so.REVERSE_MEMORY_NAME_MAP}
+        prev, crash_state = tracer.Tracer(binary, crash, resiliency=False, add_options=add_options, remove_options=remove_options).run()
         if crash_state is None:
             l.warning("input did not cause a crash")
             raise NonCrashingInput
 
+        l.debug("done tracing input")
         # a path leading up to the crashing basic block
         self.prev   = prev
 
         # the state at crash time
         self.state  = crash_state
 
-        memory_writes = [ ]
-        for act in prev.actions:
-            if act.type == "mem" and act.action == "write":
-                what = act.data.ast
-                if not (isinstance(what, int) or isinstance(what, long)):
-                    if self.state.se.symbolic(what):
-                        what_l = len(what) / 8
-                        if self.state.se.symbolic(act.addr.ast):
-                            l.warning("symbolic write target address is symbolic")
-                        target = self.state.se.any_int(act.addr.ast)
+        # get all the variables from stdin
+        stdin = self.state.posix.files[0]
+        stdin.seek(0)
+        varz = [ ]
+        for _ in xrange(self.state.se.any_int(self.state.posix.files[0].size)):
+            varz.append(list(stdin.read_from(1).variables)[0])
 
-                        memory_writes.append((target, what_l))
+        memory_writes = [ ]
+        for var in varz:
+            memory_writes.extend(self.state.memory.addrs_for_name(var))
 
         self.symbolic_mem = { }
 
-        memory_writes = sorted(memory_writes, key=lambda x: x[0])
-        write_i = 0
-        while write_i < len(memory_writes) - 1:
+        memory_writes = sorted(memory_writes)
 
-            current_w, current_len = memory_writes[write_i]
-            current_end_w = current_w + current_len
-            self.symbolic_mem[current_w] = current_len
+        current_w_start = memory_writes[0]
+        current_w_end = current_w_start + 1
 
-            next_w, next_len = memory_writes[write_i + 1]
-            next_end_w = next_w + next_len
-            if current_end_w >= next_w: # does the next address start in an existing region?
-                if not next_end_w <= current_end_w: # does the next region not end inside the existing region?
-                    self.symbolic_mem[current_w] = next_end_w - current_w
+        for write in memory_writes[1:]:
+            write_start = write
+            write_len = 1
 
-                write_i += 1
+            # segment is completely seperate
+            if write_start > current_w_end:
+                # store the old segment
+                self.symbolic_mem[current_w_start] = current_w_end - current_w_start
 
-            write_i += 1
+                # new segment, update start and end
+                current_w_start = write_start
+                current_w_end = write_start + write_len
+            else:
+                # update the end of the current segment, the segment `write` exists within current
+                current_w_end = max(current_w_end, write_start + write_len)
+
+
+        # write in the last segment
+        self.symbolic_mem[current_w_start] = current_w_end - current_w_start
 
         # crash type
         self.crash_type = None
+
+        l.debug("triaging crash")
         self._triage_crash()
 
 ### EXPOSED
