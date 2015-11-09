@@ -18,15 +18,17 @@ class Crash(object):
     Triage a crash using angr.
     '''
 
-    def __init__(self, binary, crash, aslr=None):
+    def __init__(self, binary, crash=None, pov_file=None, aslr=None):
         '''
         :param binary: path to the binary which crashed
         :param crash: string of input which crashed the binary
+        :param pov_file: CGC PoV describing a crash
         :param aslr: analyze the crash with aslr on or off
         '''
 
         self.binary = binary
         self.crash  = crash
+        self.pov_file = pov_file
 
         self.project = angr.Project(binary)
 
@@ -55,7 +57,7 @@ class Crash(object):
         remove_options = {so.TRACK_MEMORY_ACTIONS, so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
                 so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.TRACK_ACTION_HISTORY}
         add_options = {so.REVERSE_MEMORY_NAME_MAP}
-        prev, crash_state = tracer.Tracer(binary, crash, resiliency=False, add_options=add_options, remove_options=remove_options).run()
+        prev, crash_state = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False, add_options=add_options, remove_options=remove_options).run()
         if crash_state is None:
             l.warning("input did not cause a crash")
             raise NonCrashingInput
@@ -67,15 +69,9 @@ class Crash(object):
         # the state at crash time
         self.state  = crash_state
 
-        # get all the variables from stdin
-        stdin = self.state.posix.files[0]
-        stdin.seek(0)
-        varz = [ ]
-        for _ in xrange(self.state.se.any_int(self.state.posix.files[0].size)):
-            varz.append(list(stdin.read_from(1).variables)[0])
-
+        # hacky trick to get all bytes
         memory_writes = [ ]
-        for var in varz:
+        for var in self.state.memory.mem._name_mapping.keys():
             memory_writes.extend(self.state.memory.addrs_for_name(var))
 
         self.symbolic_mem = { }
