@@ -22,8 +22,7 @@ class Crash(object):
         '''
         :param binary: path to the binary which crashed
         :param crash: string of input which crashed the binary
-        :param stack_base: option base address of the stack, if none is specified this will either be infered or left as
-            None, depending on the platform
+        :param aslr: analyze the crash with aslr on or off
         '''
 
         self.binary = binary
