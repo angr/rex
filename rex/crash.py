@@ -122,9 +122,9 @@ class Crash(object):
         craft an exploit for a crash
         '''
 
-        # if this crash hasn't been classified, classify it now
+        # crash should have been classified at this point
         if not self.exploitable():
-                raise CannotExploit
+                raise CannotExploit("non-exploitable crash")
 
         if self.os == 'cgc':
             exploit = CGCExploitFactory(self, **kwargs)
