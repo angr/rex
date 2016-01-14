@@ -54,7 +54,7 @@ class Crash(object):
             self.aslr = aslr
 
         # run the tracer, grabbing the crash state
-        remove_options = {so.TRACK_MEMORY_ACTIONS, so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
+        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
                 so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.TRACK_ACTION_HISTORY}
         add_options = {so.REVERSE_MEMORY_NAME_MAP}
         prev, crash_state = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False, add_options=add_options, remove_options=remove_options).run()
@@ -199,11 +199,13 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        for a in self.state.log.actions:
+        for a in self.prev.state.log.actions:
             if a.type == 'mem':
                 if self.state.se.symbolic(a.addr):
                     symbolic_actions.append(a)
 
+        # TODO: pick the crashing action based off the crashing instruction address,
+        # crash fixup attempts will break on this
         for sym_action in symbolic_actions:
             if sym_action.action == "write":
                 if self.state.se.symbolic(sym_action.data):
@@ -212,6 +214,13 @@ class Crash(object):
                 else:
                     l.info("detected write-x-where vulnerability")
                     self.crash_type = Vulnerability.WRITE_X_WHERE
+
+                return
+
+            if sym_action.action == "read":
+                # special vulnerability type, if this is detected we can explore the crash further
+                l.info("detected arbitrary-read vulnerability")
+                self.crash_type = Vulnerability.ARBITRARY_READ
 
                 return
 
