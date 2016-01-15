@@ -115,7 +115,10 @@ class Crash(object):
         :return: True if the crash's type is generally considered exploitable, False otherwise
         '''
 
-        return not self.crash_type is None
+        exploitables = [Vulnerability.IP_OVERWRITE, Vulnerability.PARTIAL_IP_OVERWRITE, Vulnerability.BP_OVERWRITE,
+                Vulnerability.PARTIAL_BP_OVERWRITE, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
+
+        return self.crash_type in exploitables
 
     def exploit(self, **kwargs):
         '''
