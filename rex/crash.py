@@ -120,6 +120,14 @@ class Crash(object):
 
         return self.crash_type in exploitables
 
+    def explorable(self):
+        '''
+        determine if the crash can be explored with the 'crash explorer'.
+        :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
+        '''
+
+        return self.crash_type == Vulnerability.ARBITRARY_READ
+
     def exploit(self, **kwargs):
         '''
         craft an exploit for a crash
