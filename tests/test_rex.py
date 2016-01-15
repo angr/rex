@@ -16,6 +16,7 @@ def test_cpp_vptr_smash():
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_vptr_smash"), crash)
 
     nose.tools.assert_equal(crash.crash_type, Vulnerability.ARBITRARY_READ)
+    nose.tools.assert_false(crash.exploitable())
 
 def test_linux_stacksmash():
     '''
