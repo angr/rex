@@ -4,6 +4,7 @@ import nose
 
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
+public_bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-public/tests'))
 
 CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ","").decode('hex')
 
@@ -13,7 +14,7 @@ def test_cpp_vptr_smash():
     '''
 
     crash = "A" * 300
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_vptr_smash"), crash)
+    crash = rex.Crash(os.path.join(public_bin_location, "i386/vuln_vptr_smash"), crash)
 
     nose.tools.assert_equal(crash.crash_type, Vulnerability.ARBITRARY_READ)
     nose.tools.assert_false(crash.exploitable())
@@ -25,7 +26,7 @@ def test_linux_stacksmash():
     '''
 
     crash = "A" * 227
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash)
+    crash = rex.Crash(os.path.join(public_bin_location, "i386/vuln_stacksmash"), crash)
     exploit = crash.exploit()
 
     # make sure we're able to exploit it in all possible ways
