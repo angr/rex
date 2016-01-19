@@ -16,8 +16,16 @@ def test_cpp_vptr_smash():
     crash = "A" * 300
     crash = rex.Crash(os.path.join(public_bin_location, "i386/vuln_vptr_smash"), crash)
 
+    # this should just tell us that we have an arbitrary-read and that the crash type is explorable
+    # but not exploitable
     nose.tools.assert_equal(crash.crash_type, Vulnerability.ARBITRARY_READ)
     nose.tools.assert_false(crash.exploitable())
+    nose.tools.assert_true(crash.explorable())
+
+    crash.explore()
+    # after exploring the crash we should see that it is exploitable
+    nose.tools.assert_true(crash.exploitable)
+    nose.tools.assert_true(crash.state.se.symbolic(crash.state.regs.pc))
 
 def test_linux_stacksmash():
     '''
