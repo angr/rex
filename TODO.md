@@ -1,4 +1,6 @@
-* State-Aware ROP
+* Payload Improvements
+    1. Shellcode splitting, if there isn't one buffer where we can fit all our shellcode, but multiple small buffers, split the shellcode into chunks which jump between each other
+    1. More shellcodes, for example small shellcodes which read in more code.
     1. state aware rop gadget finder, won't set arguments which are already controlled
     1. can identify libcgc functions which are helpful for chain building
 
