@@ -1,11 +1,39 @@
 import rex
-from rex.vulnerability import Vulnerability
 import nose
+import struct
+from rex.vulnerability import Vulnerability
 
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
 
 CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ","").decode('hex')
+
+def test_shellcode_placement():
+    '''
+    Test that shellcode is placed in only executable memory regions.
+    '''
+
+    import logging
+    logging.getLogger("tracer").setLevel("DEBUG")
+
+    crash = "A" * 272
+    crash = rex.Crash(os.path.join(bin_location, "tests/i386/shellcode_tester"), crash)
+
+    arsenal = crash.exploit()
+
+    exploit = arsenal.register_setters['eax']
+
+    # make sure the shellcode was placed into the executable heap page
+    heap_top = crash.state.se.any_int(crash.state.cgc.allocation_base)
+    nose.tools.assert_equal(struct.unpack("<I", exploit._raw_payload[-4:])[0] & 0xfffff000, heap_top)
+
+    exec_regions = filter(lambda a: crash.state.se.any_int(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem)
+
+    # should just be two executable regions
+    nose.tools.assert_equal(len(exec_regions), 2)
+
+    # only executable regions should be that one heap page and the stack, despite having more heap control and global control
+    nose.tools.assert_equal(sorted(exec_regions), sorted([0xb7ffb000, 0xbaaaaeec]))
 
 def test_cpp_vptr_smash():
     '''
