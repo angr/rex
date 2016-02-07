@@ -9,7 +9,7 @@ CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ","").decode('h
 
 def test_cpp_vptr_smash():
     '''
-    Test detection of 'arbitrary-read' vulnerability type. (that's it... for now)
+    Test detection of 'arbitrary-read' vulnerability type, exploration of the crash, and exploitation post-exploration
     '''
 
     crash = "A" * 512
