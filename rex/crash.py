@@ -58,7 +58,7 @@ class Crash(object):
         # run the tracer, grabbing the crash state
         remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
                 so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS}
-        add_options = {so.REVERSE_MEMORY_NAME_MAP}
+        add_options = {so.REVERSE_MEMORY_NAME_MAP, so.TRACK_ACTION_HISTORY}
         prev, crash_state = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False, add_options=add_options, remove_options=remove_options).run(constrained_addrs)
         if crash_state is None:
             l.warning("input did not cause a crash")
