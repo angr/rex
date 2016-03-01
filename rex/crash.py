@@ -3,6 +3,7 @@ import logging
 l = logging.getLogger("rex.Crash")
 
 import os
+import md5
 import angr
 import angrop
 import tracer
@@ -35,7 +36,9 @@ class Crash(object):
         self.project = angr.Project(binary)
 
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
-        rop_cache_path = os.path.join("/tmp", "%s-rop" % os.path.basename(self.binary))
+        # hash binary contents for rop cache name
+        binhash = md5.new(open(self.binary).read()).hexdigest()
+        rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
         self.rop = self.project.analyses.ROP()
         if os.path.exists(rop_cache_path):
             l.info("loading rop gadgets from cache '%s'", rop_cache_path)
