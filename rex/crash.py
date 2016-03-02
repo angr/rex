@@ -3,10 +3,10 @@ import logging
 l = logging.getLogger("rex.Crash")
 
 import os
-import md5
 import angr
 import angrop
 import tracer
+import hashlib
 from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
 from simuvex import s_options as so
@@ -37,7 +37,7 @@ class Crash(object):
 
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
         # hash binary contents for rop cache name
-        binhash = md5.new(open(self.binary).read()).hexdigest()
+        binhash = hashlib.md5(open(self.binary).read()).hexdigest()
         rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
         self.rop = self.project.analyses.ROP()
         if os.path.exists(rop_cache_path):
