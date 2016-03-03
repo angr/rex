@@ -112,6 +112,11 @@ def test_cpp_vptr_smash():
     leaked_header = leaked[leak_start:leak_start+0x10]
     nose.tools.assert_equals(leaked_header, CGC_HEADER)
 
+
+    # make sure the test succeeds on every register setter
+    for reg in arsenal.register_setters:
+        nose.tools.assert_true(arsenal.register_setters[reg].test())
+
 def test_linux_stacksmash():
     '''
     Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
@@ -194,6 +199,10 @@ def test_cgc_type1_rop_stacksmash():
     leak_start = leaked.find("\x7fCGC")
     leaked_header = leaked[leak_start:leak_start+0x10]
     nose.tools.assert_equals(leaked_header, CGC_HEADER)
+
+    # make sure the test succeeds on every register setter
+    for reg in exploit.register_setters:
+        nose.tools.assert_true(exploit.register_setters[reg].test())
 
 def run_all():
     functions = globals()
