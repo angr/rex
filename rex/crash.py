@@ -74,6 +74,9 @@ class Crash(object):
         # the state at crash time
         self.state  = crash_state
 
+        # list of actions added during exploitation, probably better object for this attribute to belong to
+        self.added_actions = [ ]
+
         # hacky trick to get all bytes
         memory_writes = [ ]
         for var in self.state.memory.mem._name_mapping.keys():
@@ -199,6 +202,7 @@ class Crash(object):
         cp.aslr = self.aslr
         cp.prev = self.prev.copy()
         cp.state = self.state.copy()
+        cp.added_actions = list(self.added_actions)
         cp.symbolic_mem = self.symbolic_mem.copy()
         cp.crash_type = self.crash_type
 
