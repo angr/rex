@@ -21,5 +21,6 @@ setup(
             'simuvex',
             'tracer',
             'angrop',
+            'compilerex',
       ],
 )
