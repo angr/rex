@@ -6,7 +6,8 @@ from rex.vulnerability import Vulnerability
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
 
-CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ","").decode('hex')
+CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ", "").decode('hex')
+
 
 def test_shellcode_placement():
     '''
@@ -73,7 +74,7 @@ def test_cpp_vptr_smash():
     # make sure our ecx chain actually works (ecx is chosen arbitrarily)
     ecx_exploit = arsenal.register_setters['ecx']
 
-    c_str = ecx_exploit._chain.payload_str(constraints=(ecx_exploit._value_var==0x50495a41))
+    c_str = ecx_exploit._chain.payload_str(constraints=(ecx_exploit._value_var == 0x50495a41))
     c_bvv = ecx_exploit.crash.state.se.BVV(c_str)
 
     c_mem = ecx_exploit.crash.state.memory.load(ecx_exploit._chain_addr, len(c_str))
@@ -92,7 +93,8 @@ def test_cpp_vptr_smash():
     leaker_exploit = arsenal.best_type2
 
     # leak the memory at the binary's base address
-    c_str = leaker_exploit._chain.payload_str(constraints=(leaker_exploit._addr_var==0x8048000))
+    c_str = leaker_exploit._chain.payload_str(constraints=(leaker_exploit._addr_var == 0x8048000,
+                                                           leaker_exploit._size_var == 0x1000))
     c_bvv = leaker_exploit.crash.state.se.BVV(c_str)
 
     c_mem = leaker_exploit.crash.state.memory.load(leaker_exploit._chain_addr, len(c_str))
@@ -183,7 +185,8 @@ def test_cgc_type1_rop_stacksmash():
     leaker_exploit = exploit.best_type2
 
     # leak the memory at the binary's base address
-    c_str = leaker_exploit._chain.payload_str(constraints=(leaker_exploit._addr_var==0x8048000))
+    c_str = leaker_exploit._chain.payload_str(constraints=(leaker_exploit._addr_var == 0x8048000,
+                                                           leaker_exploit._size_var == 0x1000))
     c_bvv = leaker_exploit.crash.state.se.BVV(c_str)
 
     c_mem = leaker_exploit.crash.state.memory.load(leaker_exploit._chain_addr, len(c_str))
