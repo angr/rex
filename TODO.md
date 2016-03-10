@@ -19,5 +19,4 @@
 
 * Basics
     1. use register trampolines, when calling shellcode see if any registers are pointing to our payload, if so call those registers with gadgets
-    1. Need a way of querying if a page is executable
     1. Recover randomness and challenge-response during exploit generation
