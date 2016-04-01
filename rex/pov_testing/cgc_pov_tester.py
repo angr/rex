@@ -61,7 +61,7 @@ class CGCPovTester(object):
             os.dup2(challenge_w, 1)  # write to the pov
             os.dup2(devnull.fileno(), 2)  # silence segfault message
 
-            argv = [qemu_path, "-magicdump", "magic", "-strace", cb_path]
+            argv = [qemu_path, "-magicdump", "magic", cb_path]
             os.execve(qemu_path, argv, os.environ)
 
             assert True, "failed to execute target binary %s" % cb_path
@@ -183,7 +183,7 @@ class CGCPovTester(object):
 
         l.debug("waiting on challenge binary...")
 
-        pid, returncode = os.waitpid(challenge_binary_pid, 0)
+        _, returncode = os.waitpid(challenge_binary_pid, 0)
 
         l.debug("... challenge binary terminated")
 
