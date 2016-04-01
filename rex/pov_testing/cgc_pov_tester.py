@@ -199,6 +199,8 @@ class CGCPovTester(object):
         a_mesg = "no core file found, challenge binary crashed?"
         assert corefile is not None, a_mesg
 
+        l.debug("found corefile for challenge in file %s", corefile)
+
         # load core file and grab registers
         p = angr.Project(corefile)
         set_reg_value = None
@@ -212,6 +214,9 @@ class CGCPovTester(object):
         assert set_ip_value is not None, "eip's value not found in core file"
         a_mesg = "%s's value not found in core file" % register
         assert set_reg_value is not None, a_mesg
+
+        l.debug("register value set to: %#x", set_reg_value)
+        l.debug("ip value set to: %#x", set_ip_value)
 
         register_set = set_reg_value & regmask == reg_val & regmask
         ip_set = set_ip_value & ipmask == ip_val & ipmask
