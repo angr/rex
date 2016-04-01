@@ -3,6 +3,7 @@ import shutil
 import random
 import struct
 import socket
+import signal
 import resource
 import tempfile
 
@@ -50,13 +51,17 @@ class CGCPovTester(object):
                     (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
                     )
 
-            devnull = open('/dev/null')
+            devnull = open('/dev/null', 'w')
 
-            os.dup2(pov_r, 0)  # read from pov as stdin
+            # close the other entry
+            os.close(pov_w)
+            os.close(challenge_r)
+
+            os.dup2(pov_r, 0) # read from pov as stdin
             os.dup2(challenge_w, 1)  # write to the pov
             os.dup2(devnull.fileno(), 2)  # silence segfault message
 
-            argv = [qemu_path, "-magicdump", "magic", cb_path]
+            argv = [qemu_path, "-magicdump", "magic", "-strace", cb_path]
             os.execve(qemu_path, argv, os.environ)
 
             assert True, "failed to execute target binary %s" % cb_path
@@ -64,6 +69,11 @@ class CGCPovTester(object):
         # fork off the pov binary
         pov_pid = os.fork()
         if pov_pid == 0:
+
+            # close the other entry
+            os.close(pov_r)
+            os.close(challenge_w)
+
             os.dup2(challenge_r, 0)  # read from challenge's stdout
             os.dup2(pov_w, 1)  # write to challenge's stdin
 
@@ -74,6 +84,19 @@ class CGCPovTester(object):
 
             pbf = pov_filename
             assert True, "failed to execute binary pov %s" % pbf
+
+        # clean up the pipes in the host
+        os.close(challenge_r)
+        os.close(challenge_w)
+        os.close(pov_r)
+        os.close(pov_w)
+
+        l.debug("challenge_r: %d", challenge_r)
+        l.debug("challenge_w: %d", challenge_w)
+        l.debug("pov_r: %d", pov_r)
+        l.debug("pov_w: %d", pov_w)
+        l.debug("pov_pid: %d", pov_pid)
+        l.debug("challenge_bin_pid: %d", challenge_bin_pid)
 
         # negiotation is specific to type1 / type2
         result = self._do_binary_negotiation(negotiation_infra, directory,
@@ -107,12 +130,15 @@ class CGCPovTester(object):
         if self.expected_type is not None:
             assert pov_type == self.expected_type, "received incorrect pov type"
 
+        l.debug("recieved pov_type of %d\n", pov_type)
         if pov_type == 1:
+            l.debug("entering type1 negotiation")
             return self._do_binary_negotiation_type_1(negotiation_pipe, directory,
-                                               challenge_binary_pid)
+                                                      challenge_binary_pid)
         elif pov_type == 2:
+            l.debug("entering type2 negotiation")
             return self._do_binary_negotiation_type_2(negotiation_pipe, directory,
-                                               challenge_binary_pid)
+                                                      challenge_binary_pid)
         else:
             raise Exception("Invalid pov type: %d", pov_type)
 
@@ -131,6 +157,10 @@ class CGCPovTester(object):
         regmask = struct.unpack("<I", negotiation_pipe.recv(4))[0]
         regnum = struct.unpack("<I", negotiation_pipe.recv(4))[0]
 
+        l.debug("recieved a ipmask of %#x", ipmask)
+        l.debug("recieved a regmask of %#x", regmask)
+        l.debug("recieved a regnum of %#x", regnum)
+
         register = CGCPovTester.registers[regnum]
         if self.expected_register is not None:
             assert register == self.expected_register, \
@@ -144,11 +174,21 @@ class CGCPovTester(object):
         reg_val = random.randint(0, 0xffffffff)
         ip_val = random.randint(0, 0xffffffff)
 
+        l.debug("requesting a register value of %#x", reg_val)
+        l.debug("requesting a ip value of %#x", ip_val)
+
         negotiation_pipe.send(
                 struct.pack("<I", ip_val) + struct.pack("<I", reg_val)
                 )
 
-        os.waitpid(challenge_binary_pid, 0)
+        l.debug("waiting on challenge binary...")
+
+        pid, returncode = os.waitpid(challenge_binary_pid, 0)
+
+        l.debug("... challenge binary terminated")
+
+        a_mesg = "challenge binary did not crash, instead returned exit code %d", returncode
+        assert returncode in [signal.SIGSEGV, signal.SIGILL], a_mesg
 
         corefile = None
         for item in os.listdir(directory):
