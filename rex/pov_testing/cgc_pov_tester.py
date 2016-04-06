@@ -187,6 +187,9 @@ class CGCPovTester(object):
 
         l.debug("... challenge binary terminated")
 
+        # only check the relevant bits
+        returncode &= 0x7f
+
         a_mesg = "challenge binary did not crash, instead returned exit code %d", returncode
         assert returncode in [signal.SIGSEGV, signal.SIGILL], a_mesg
 
