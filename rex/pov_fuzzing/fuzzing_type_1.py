@@ -31,6 +31,8 @@ class CrashFuzzerException(Exception):
     pass
 
 
+# TODO consider removing dependence on angr
+# TODO handle timeouts
 # TODO move to it's own project?
 # TODO make this fast bprm->core_dump
 # have qemu write to stderr?
