@@ -208,7 +208,7 @@ def test_cgc_type1_rop_stacksmash():
 
     # make sure the test succeeds on every register setter
     for reg in exploit.register_setters:
-        nose.tools.assert_true(exploit.register_setters[reg].test())
+        nose.tools.assert_true(exploit.register_setters[reg].test_binary())
 
     # make sure the test succeeds on every leaker
     for leaker in exploit.leakers:
