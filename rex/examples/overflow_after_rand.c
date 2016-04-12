@@ -55,7 +55,7 @@ int strlen(const char *s) {
     return len;
 }
 
-size_t receive_n( int fd, unsigned char *dst, size_t n_bytes )
+size_t receive_n( int fd, char *dst, size_t n_bytes )
 {
   size_t len = 0;
   size_t rx = 0;
@@ -83,35 +83,44 @@ int send_all(int fd, const void *msg, size_t n_bytes)
   return 0;
 }
 
-void do_write_what_where() {
-    // I use a struct for the stack to guarantee layout
-    struct stack_func_1 stack;
-    const char *message = "This should print out 4 A's\n";
-    int foo = 0x5a5a5a5a;
-    stack.where = &foo;
-    stack.what = 0x41414141;
-    receive_until(0, stack.buf, '\n', 0x28);
-    *(stack.where) = stack.what;
+void do_win() {
+    const char *message = "Here's your overflow!!!\n";
+    char name[0x20];
     send_all(1, message, strlen(message));
-    send_all(1, (char *)&foo, 4);
-    send_all(1, "\n", 1);
+    receive_until(0, name, '\n', 0x40);
 }
 
-void some_other_func() {
-    const char *message = "It could even be extended to check some cfi and then we could see if an exploit is still possible\n";
+void play_game() {
+    char r;
+    char guess[2];
+    if(random(&r, 1, NULL)) {
+        return;
+    }
+    const char *message = "Guess: ";
     send_all(1, message, strlen(message));
-    do_write_what_where();
+    receive_until(0, guess, '\n', 2);
+    if (r == guess[0]) {
+        do_win();
+    }
 }
 
 int main() {
-  char buf[0x100] = "Hello this is a test program with a write what where\n";
+  char buf[0x100] = "Hello this is a test program where you must first guess a 1 byte random number then you can overflow\n";
+  char resp[2];
   send_all(1, buf, strlen(buf));
-  some_other_func();
+  int loop = 1;
+  while (loop) {
+    play_game();
+    send_all(1, "continue? ", strlen("continue? "));
+    receive_until(0, resp, '\n', 2);
+    if (resp[0] == 'y' || resp[0] == 'Y') {
+        loop = 1;
+    } else {
+        loop = 0;
+    }
+  }
 
   return 0;
 }
-
-// leaking payload "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x58\xae\xaa\xba\x00\xc0GC\n"
-// crashing payload "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
 
 
