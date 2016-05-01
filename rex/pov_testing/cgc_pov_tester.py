@@ -64,7 +64,7 @@ class CGCPovTester(object):
             argv = [qemu_path, "-magicdump", "magic", cb_path]
             os.execve(qemu_path, argv, os.environ)
 
-            assert True, "failed to execute target binary %s" % cb_path
+            assert False, "failed to execute target binary %s" % cb_path
 
         # fork off the pov binary
         pov_pid = os.fork()
@@ -116,7 +116,7 @@ class CGCPovTester(object):
     def _do_binary_negotiation(self, negotiation_pipe, directory,
                                challenge_binary_pid):
         """
-        Negotiate with a Type 1 PoV binary
+        Negotiate with a PoV binary
         :param negotiation_pipe: pipe to read negotiation materials from
         :param directory: directory core file will be found
         :param challenge_binary_pid: pid of the challenge binary, we will wait
