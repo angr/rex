@@ -268,6 +268,7 @@ class Crash(object):
         cp.added_actions = list(self.added_actions)
         cp.symbolic_mem = self.symbolic_mem.copy()
         cp.crash_type = self.crash_type
+        cp._tracer = self._tracer
 
         return cp
 
