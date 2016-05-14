@@ -1,5 +1,6 @@
 import logging
 import tempfile
+import itertools
 from collections import defaultdict
 from multiprocessing import Pool
 from rex.pov_testing import CGCPovTester
@@ -15,6 +16,7 @@ l.setLevel("DEBUG")
 
 
 NUM_CGC_BITS = 20
+CGC_GENERAL_REGS = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
 
 
 class ByteAnalysis(object):
@@ -27,7 +29,21 @@ class ByteAnalysis(object):
         self.register_bitmasks = dict()
 
 
+class NumberStr(object):
+    def __init__(self, min_len, max_len, start_idx, end_idx, max_val, base):
+        self.min_len = min_len
+        self.max_len = max_len
+        self.start_idx = start_idx
+        self.end_idx = end_idx
+        self.base = base
+        self.max_val = max_val
+
+
 class CrashFuzzerException(Exception):
+    pass
+
+
+class ComplexAnalysisException(CrashFuzzerException):
     pass
 
 
@@ -35,6 +51,7 @@ class CrashFuzzerException(Exception):
 # TODO handle timeouts
 # TODO move to it's own project?
 # TODO make this fast bprm->core_dump
+# TODO rewrite to construct payload in sections of sends or at least where things need to be changed
 # have qemu write to stderr?
 def _get_reg_vals(binary_input_byte):
     binary, test_input, c = binary_input_byte
@@ -42,6 +59,9 @@ def _get_reg_vals(binary_input_byte):
     if not r.crash_mode:
         return [c, None]
     else:
+        reg_vals = dict()
+        for reg in CGC_GENERAL_REGS:
+            reg_vals[reg] = r.reg_vals[reg]
         return [c, r.reg_vals]
 
 
@@ -68,18 +88,55 @@ class Type1CrashFuzzer(object):
 
         self.pool = None
         self.byte_analysis = dict()
-        self.reg_analysis = defaultdict(dict)
+        self._bases = dict()
+        self.skip_bytes = set()
+        self.skip_sets = set()
+        self.regs_to_numbers = dict()
+        self.used_bytes = set()
+        self.byte_translation_funcs = list()
+        self.byte_translation_calls = dict()
+
+        self.make_bases()
         self.run()
+
+    def make_bases(self):
+        for base in range(2, 20):
+            accepted_chars = set()
+            accepted_chars.update(chr(i+ord("0")) for i in range(0, min(base, 10)))
+            if base > 10:
+                for i in range(10, base):
+                    accepted_chars.add(chr(ord("a")+i-10))
+                    accepted_chars.add(chr(ord("A")+i-10))
+            self._bases[base] = accepted_chars
 
     def run(self):
         self.pool = Pool(processes=8)
         # for each byte of input we will try all possible characters and determine how they change bits in the registers
-        for i in range(84, len(self.crash)):
-            self.analyze_byte(i)
+        for i in range(0, len(self.crash)):
+            self.analyze_bytes([i])
         self.pool.close()
 
-    def analyze_byte(self, byte_index):
-        l.info("fuzzing byte %d", byte_index)
+    @staticmethod
+    def _replace_indices(s, c, indices):
+        for i in indices:
+            s = s[:i] + c + s[i+1:]
+        return s
+
+    @staticmethod
+    def _replace_indices_len(s, to_rep, len_to_remove, indices):
+        for i in indices:
+            s = s[:i] + to_rep + s[i+len_to_remove:]
+        return s
+
+    def analyze_bytes(self, byte_indices, check_for_copies=True):
+        if any(i in self.skip_bytes for i in byte_indices):
+            return False
+        if frozenset(set(byte_indices)) in self.skip_sets:
+            return False
+        if len(byte_indices) == 1:
+            l.info("fuzzing byte %d", byte_indices[0])
+        else:
+            l.info("fuzzing bytes %s", byte_indices)
         bytes_to_regs = dict()
 
         bytes_that_change_crash = set()
@@ -89,9 +146,9 @@ class Type1CrashFuzzer(object):
 
         binary_input_bytes = []
         for i in xrange(256):
-            input = self.crash[:byte_index] + chr(i) + self.crash[byte_index+1:]
-            binary_input_bytes.append((self.binary, input, chr(i)))
-        it = self.pool.imap_unordered(_get_reg_vals, binary_input_bytes, chunksize=4)
+            test_input = self._replace_indices(self.crash, chr(i), byte_indices)
+            binary_input_bytes.append((self.binary, test_input, chr(i)))
+        it = self.pool.imap(_get_reg_vals, binary_input_bytes, chunksize=4)
         for c, reg_vals in it:
             if reg_vals is not None:
                 bytes_to_regs[c] = reg_vals
@@ -103,7 +160,7 @@ class Type1CrashFuzzer(object):
             ip_counts[reg_vals["eip"]] += 1
 
         # if multiple registers change we might've found a different crash
-        for c in bytes_to_regs.keys():
+        for c in sorted(bytes_to_regs.keys()):
             reg_vals = bytes_to_regs[c]
             num_diff = 0
             for r in reg_vals.keys():
@@ -126,8 +183,11 @@ class Type1CrashFuzzer(object):
                 all_reg_vals[reg].add(reg_vals[reg])
 
         byte_analysis = ByteAnalysis()
-        self.byte_analysis[byte_index] = byte_analysis
+        for i in byte_indices:
+            self.byte_analysis[i] = byte_analysis
         byte_analysis.valid_bytes = set(bytes_to_regs.keys())
+
+        found_interesting = False
 
         for reg in all_reg_vals.keys():
             possible_vals = all_reg_vals[reg]
@@ -144,7 +204,8 @@ class Type1CrashFuzzer(object):
                     if c == "1":
                         bit_indices.append(31-i)
                 if number_bits > 8:
-                    raise CrashFuzzerException("byte affects more than 8 bits?")
+                    found_interesting = self.analyze_complex(byte_indices, reg, bytes_to_regs) or found_interesting
+                    break
 
                 # might want to check for impossible bit patterns
                 if controlled_bits != 0:
@@ -190,9 +251,128 @@ class Type1CrashFuzzer(object):
                         break
 
                 if controlled_bits != 0:
-                    l.info("Register %s has the following bitmask %s for byte %d of the input",
-                           reg, hex(controlled_bits), byte_index)
+                    l.info("Register %s has the following bitmask %s for bytes %s of the input",
+                           reg, hex(controlled_bits), byte_indices)
                     byte_analysis.register_bitmasks[reg] = controlled_bits
+                    found_interesting = True
+
+        if not found_interesting and len(byte_indices) == 1 and check_for_copies:
+            # we will look for if the same pattern has to be somewhere else in the payload
+            byte_index = byte_indices[0]
+            substr = self.crash[byte_index:byte_index+3]
+            if len(substr) > 2 and self.crash.count(substr) > 1:
+                all_starts = list(self._str_find_all(self.crash, substr))
+                if len(all_starts) == 1:
+                    return
+                strs = [self.crash[i:] for i in all_starts]
+                common_len = len(self._longest_common_prefix(strs))
+                for i in range(common_len):
+                    found_interesting = self.analyze_bytes([start+i for start in all_starts], check_for_copies=False)
+                    if not found_interesting:
+                        for j in range(i, common_len):
+                            self.skip_sets.add(frozenset(start + j for start in all_starts))
+                        break
+                    else:
+                        self.skip_bytes.update(start + i for start in all_starts)
+
+        return found_interesting
+
+    @staticmethod
+    def _str_find_all(a_str, sub):
+        start = 0
+        while True:
+            start = a_str.find(sub, start)
+            if start == -1:
+                return
+            yield start
+            start += 1
+
+    @staticmethod
+    def _longest_common_prefix(strs):
+        common_prefix = ""
+        for i in itertools.izip(*strs):
+            if i.count(i[0]) == len(i):
+                common_prefix += i[0]
+            else:
+                break
+        return common_prefix
+
+    def read_int(self, s, base, max_len):
+        accepted_chars = self._bases[base]
+        end = 0
+        while end < min(len(s), max_len) and s[end] in accepted_chars:
+            end += 1
+
+        if end == 0:
+            return None
+        else:
+            return int(s[:end], base) & 0xffffffff
+
+    def analyze_complex(self, byte_indices, reg, bytes_to_regs):
+        # returns whether or not the analyses found something
+
+        # do some checks
+        votes = defaultdict(int)
+        remainder = self._longest_common_prefix([self.crash[i+1:] for i in byte_indices])
+        for c in bytes_to_regs:
+            expected = bytes_to_regs[c][reg]
+            s = c + remainder
+            for base in range(2, 20):
+                for max_len in range(2, 20):
+                    if self.read_int(s, base, max_len) == expected:
+                        votes[(base, max_len)] += 1
+                        break
+
+        if len(votes) == 0:
+            l.warning("unkown complex byte")
+            return False
+        base, current_len = max(votes.keys(), key=lambda x: votes[x])
+        l.debug("chose base %d with max len %d", base, current_len)
+
+        # now we need to decide if we can actually change the length of the integer
+        max_working = current_len
+        min_working = current_len
+        for i in range(1, current_len + 10):
+            test_input = self._replace_indices_len(self.crash, "1"*i, current_len, byte_indices)
+            expected = int("1"*i, base) & 0xffffffff
+            reg_vals = _get_reg_vals((self.binary, test_input, 0))[1]
+            if reg_vals is None or reg_vals[reg] != expected:
+                pass
+            else:
+                max_working = max(max_working, i)
+                min_working = min(min_working, i)
+        l.debug("Decided that input length has a min of %d and a max of %d", min_working, max_working)
+        l.debug("Currently starts at index %d and ends at index %d", byte_indices[0], byte_indices[0]+current_len)
+        if len(byte_indices) > 1:
+            l.debug("Multiple copies of the int str at indices %s", byte_indices)
+
+        # now we set up what's needed
+        for i in byte_indices:
+            self.skip_bytes.update(range(i, i+current_len))
+        max_val = min(base**(max_working+1)-1, 0x7fffffff)
+        if max_val < int("1"*NUM_CGC_BITS, 2):
+            l.warning("max_val too small to use as a type1")
+            return True
+
+        self.regs_to_numbers[reg] = set()
+        for i in byte_indices:
+            num_str = NumberStr(min_working, max_working, i, i + current_len, max_val, base)
+            self.regs_to_numbers[reg].add(num_str)
+        return False
+
+    def _reg_is_controlled(self, reg):
+        if reg in self.regs_to_numbers:
+            return True
+
+        reg_bitmasks = defaultdict(int)
+        for byte_analysis in self.byte_analysis.values():
+            if reg in byte_analysis:
+                reg_bitmasks[reg] |= byte_analysis.register_bitmasks[reg]
+
+        if bin(reg_bitmasks[reg]).count("1") >= NUM_CGC_BITS:
+            return True
+
+        return False
 
     def exploitable(self):
         reg_bitmasks = defaultdict(int)
@@ -200,7 +380,7 @@ class Type1CrashFuzzer(object):
             for r in byte_analysis.register_bitmasks:
                 reg_bitmasks[r] |= byte_analysis.register_bitmasks[r]
 
-        if bin(reg_bitmasks["eip"]).count("1") < NUM_CGC_BITS:
+        if bin(reg_bitmasks["eip"]).count("1") < NUM_CGC_BITS and "eip" not in self.regs_to_numbers:
             return False
 
         for r in reg_bitmasks:
@@ -208,26 +388,33 @@ class Type1CrashFuzzer(object):
                 continue
             if bin(reg_bitmasks[r]).count("1") >= NUM_CGC_BITS:
                 return True
+
+        if any(r in self.regs_to_numbers for r in CGC_GENERAL_REGS):
+            return True
+
         return False
 
-    def _create_translation_c(self, general_reg):
+    def _create_translation_c(self, register):
+        # use the other function if needed
+        if register in self.regs_to_numbers:
+            for num_obj in self.regs_to_numbers[register]:
+                return self._create_translation_c_number(register, num_obj)
+
         # create the bit_pattern table
-        # then we inject the bit pattern translation table into the c code
-        translation_tables = []
-        c_codes = []
+        # then we inject the bit pattern translation table into the c
         for i, byte_analysis in self.byte_analysis.items():
-            if general_reg in byte_analysis.register_bitmasks and byte_analysis.register_bitmasks[general_reg] != 0:
+            if register in byte_analysis.register_bitmasks and byte_analysis.register_bitmasks[register] != 0:
                 # now get the bits
-                reg_map = byte_analysis.register_pattern_maps[general_reg]
+                reg_map = byte_analysis.register_pattern_maps[register]
                 collapsed_map = dict()
                 for pattern, c in reg_map.items():
-                    collapsed = self.collapse_bits(pattern, byte_analysis.register_bitmasks[general_reg])
+                    collapsed = self.collapse_bits(pattern, byte_analysis.register_bitmasks[register])
                     collapsed_map[collapsed] = c
 
                 # now make the c table
                 table_name = "reg_byte_%d_table" % i
                 translation_table = "char " + table_name + "[] = {"
-                num_bits = bin(byte_analysis.register_bitmasks[general_reg]).count("1")
+                num_bits = bin(byte_analysis.register_bitmasks[register]).count("1")
                 for j in range(2**num_bits):
                     if j in collapsed_map:
                         translation_table += hex(ord(collapsed_map[j])) + ", "
@@ -235,22 +422,125 @@ class Type1CrashFuzzer(object):
                         raise CrashFuzzerException()
                 # remove last ", " and add }
                 translation_table = translation_table[:-2] + "};\n"
-                translation_tables.append(translation_table)
 
-                code = \
-"""key_val = collapse_bits(reg_val, %#x);
-new_char = %s[key_val];
-payload[%d] = new_char;""" % (byte_analysis.register_bitmasks[general_reg], table_name, i)
-                c_codes.append(code)
+                preamble = """\
+// function to change a particular byte, returns the number of bytes it added to buf
+int translate_byte_%#x(char *payload_p, int reg_%s) {
+    char new_char;
+    int reg_val = reg_%s;
+    int key_val;\n\n""" % (i, register, register)
+
+                code = """\
+    key_val = collapse_bits(reg_val, %#x);
+    new_char = %s[key_val];
+    *payload_p = new_char;\n""" % (byte_analysis.register_bitmasks[register], table_name)
+
+                epilogue = """\
+    // we only added one byte to the payload
+    return 1;
+}"""
+
+                which_reg = "t1vals.ipval" if register == "eip" else "t1vals.regval"
+                call = """\
+translate_byte_%#x(curr, %s);
+""" % (i, which_reg)
+
+                # now create the translation code
+                self.byte_translation_funcs.append(preamble + translation_table + code + epilogue)
+                self.byte_translation_calls[i] = call
+
+                # add the byte to the used bytes
+                self.used_bytes.add(i)
+
+    def _create_translation_c_number(self, register, num_obj):
+        code = """\
+// function to change a particular byte by int_to_str, returns the number of bytes it added to buf
+int translate_byte_%#x(char *payload_p, int reg_%s) {
+    int reg_val = reg_%s;
+    int base = %d;
+    int min_len = %d;
+    char replace_str[40];
+
+    // reduce the reg_val to the requested
+    reg_val &= %#x;
+
+    // convert the int to a string
+    int_to_str(reg_val, base, replace_str);
+    int len = strlen(replace_str);
+
+    // pad to the min_len with 0's
+    int pad = 0;
+    while (len + pad < min_len) {
+        *payload_p++ = '0';
+    }
+
+    // add to payload
+    memcpy(payload_p, replace_str, len);
+
+    // return the number of bytes added
+    return len+pad;
+}""" % (num_obj.start_idx, register, register, num_obj.base, num_obj.min_len, num_obj.max_val)
+
+        # mark all the bytes as used
+        for i in range(num_obj.start_idx, num_obj.end_idx):
+            self.used_bytes.add(i)
+
+        which_reg = "t1vals.ipval" if register == "eip" else "t1vals.regval"
+        call = """\
+translate_byte_%#x(curr, %s);
+""" % (num_obj.start_idx, which_reg)
 
         # now create the translation code
-        translation_code = "\n".join(translation_tables) + "\n\n" + "\n\n".join(c_codes)
+        self.byte_translation_funcs.append(code)
+        self.byte_translation_calls[num_obj.start_idx] = call
 
-        return translation_code
+    def _create_copy_bytes_code(self, start, end):
+        code = """\
+// function to copy bytes to the payload_buf
+int translate_byte_%#x(char *payload_p, const char *orig) {
+    int start = %d;
+    int end = %d;
+
+    int len = end - start;
+
+    // add to payload
+    memcpy(payload_p, orig + start, len);
+
+    // return the number of bytes added
+    return len;
+}""" % (start, start, end)
+
+        call = """\
+translate_byte_%#x(curr, orig);
+""" % start
+        self.byte_translation_funcs.append(code)
+        self.byte_translation_calls[start] = call
+        self.used_bytes.add(start)
+
+    def create_payload_construction(self):
+        payload_len = len(self.crash)
+        curr = 0
+        sorted_used = sorted(self.used_bytes)
+        for i in sorted_used:
+            if i - curr > 0:
+                self._create_copy_bytes_code(curr, i)
+            curr = i+1
+        if payload_len-curr > 0:
+            self._create_copy_bytes_code(curr, payload_len)
+
+        calls = []
+        for i in sorted(self.byte_translation_calls):
+            calls.append(self.byte_translation_calls[i])
+        res = ""
+        for call in calls:
+            res += "\n  curr += " + call
+        return res
 
     def dump_c(self, filename=None):
         if not self.exploitable():
             raise CrashFuzzerException("Not exploitable")
+
+        self.used_bytes = set()
 
         # pick register/bitmask
         reg_bitmasks = defaultdict(int)
@@ -265,28 +555,39 @@ payload[%d] = new_char;""" % (byte_analysis.register_bitmasks[general_reg], tabl
             if bin(reg_bitmasks[r]).count("1") >= NUM_CGC_BITS:
                 general_reg = r
                 break
+
+        if general_reg is None:
+            for r in CGC_GENERAL_REGS:
+                if r in self.regs_to_numbers:
+                    general_reg = self.regs_to_numbers.keys()[0]
+                    reg_bitmasks[general_reg] = list(self.regs_to_numbers[general_reg])[0].max_val
+
+        if "eip" in self.regs_to_numbers:
+            reg_bitmasks["eip"] = list(self.regs_to_numbers["eip"])[0].max_val
+
         # general reg should be non-None
         if general_reg is None:
             raise CrashFuzzerException("Must be a bug, it was 'exploitable' but we can't find a register to set")
 
-        translation_c_general = self._create_translation_c(general_reg)
-        translation_c_eip = self._create_translation_c("eip")
+        self.byte_translation_funcs = list()
+        self._create_translation_c(general_reg)
+        self._create_translation_c("eip")
+
+        # create the code to build the payload
+        payload_construction = self.create_payload_construction()
 
         encoded_payload = ""
         for c in self.crash:
             encoded_payload += "\\x%02x" % ord(c)
-
         fmt_args = dict()
         fmt_args["register"] = general_reg
         fmt_args["regmask"] = hex(reg_bitmasks[general_reg])
         fmt_args["ipmask"] = hex(reg_bitmasks["eip"])
         fmt_args["payload"] = encoded_payload
         fmt_args["payloadsize"] = str(len(self.crash))
-        fmt_args["generalregtranslate"] = translation_c_general
-        fmt_args["ipregtranslate"] = translation_c_eip
+        fmt_args["do_payload_construction"] = payload_construction
+        fmt_args["byte_translation_funcs"] = "\n\n".join(self.byte_translation_funcs)
 
-        # TODO using .format is annoying because of all the curly braces
-        # figure out how to do this better
         c_code = fuzzing_type_1_c_template.c_template
         for k, v in fmt_args.items():
             c_code = c_code.replace("{%s}" % k, v)
