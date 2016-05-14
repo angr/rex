@@ -57,14 +57,12 @@ class CGCPovTester(object):
             os.close(pov_w)
             os.close(challenge_r)
 
-            os.dup2(pov_r, 0) # read from pov as stdin
+            os.dup2(pov_r, 0)  # read from pov as stdin
             os.dup2(challenge_w, 1)  # write to the pov
             os.dup2(devnull.fileno(), 2)  # silence segfault message
 
             argv = [qemu_path, "-magicdump", "magic", cb_path]
             os.execve(qemu_path, argv, os.environ)
-
-            assert True, "failed to execute target binary %s" % cb_path
 
         # fork off the pov binary
         pov_pid = os.fork()
@@ -81,9 +79,6 @@ class CGCPovTester(object):
             os.dup2(negotiation_pov.fileno(), 3)
 
             os.execve(qemu_path, [qemu_path, pov_filename], os.environ)
-
-            pbf = pov_filename
-            assert True, "failed to execute binary pov %s" % pbf
 
         # clean up the pipes in the host
         os.close(challenge_r)
@@ -128,7 +123,9 @@ class CGCPovTester(object):
 
         # check pov type before doing the correct negotiation
         if self.expected_type is not None:
-            assert pov_type == self.expected_type, "received incorrect pov type"
+            if pov_type != self.expected_type:
+                l.error("received incorrect pov type")
+                return False
 
         l.debug("recieved pov_type of %d\n", pov_type)
         if pov_type == 1:
@@ -140,7 +137,8 @@ class CGCPovTester(object):
             return self._do_binary_negotiation_type_2(negotiation_pipe, directory,
                                                       challenge_binary_pid)
         else:
-            raise Exception("Invalid pov type: %d", pov_type)
+            l.error("Invalid pov type: %d", pov_type)
+            return False
 
     def _do_binary_negotiation_type_1(self, negotiation_pipe, directory,
                                       challenge_binary_pid):
@@ -163,13 +161,16 @@ class CGCPovTester(object):
 
         register = CGCPovTester.registers[regnum]
         if self.expected_register is not None:
-            assert register == self.expected_register, \
-                "unexpected register number received during negotiation"
+            if register != self.expected_register:
+                l.error("unexpected register number received during negotiation")
+                return False
 
-        a_mesg = "received a regmask with not enough bits set"
-        assert bin(regmask).count("1") >= 20, a_mesg
-        a_mesg = "received a ipmask with not enough bits set"
-        assert bin(ipmask).count("1") >= 20, a_mesg
+        if bin(regmask).count("1") < 20:
+            l.error("received a regmask with not enough bits set")
+            return False
+        if bin(ipmask).count("1") < 20:
+            l.error("received a ipmask with not enough bits set")
+            return False
 
         reg_val = random.randint(0, 0xffffffff)
         ip_val = random.randint(0, 0xffffffff)
@@ -190,8 +191,9 @@ class CGCPovTester(object):
         # only check the relevant bits
         returncode &= 0x7f
 
-        a_mesg = "challenge binary did not crash, instead returned exit code %d", returncode
-        assert returncode in [signal.SIGSEGV, signal.SIGILL], a_mesg
+        if returncode not in [signal.SIGSEGV, signal.SIGILL]:
+            l.error("challenge binary did not crash, instead returned exit code %d", returncode)
+            return False
 
         corefile = None
         for item in os.listdir(directory):
@@ -199,8 +201,9 @@ class CGCPovTester(object):
                 corefile = os.path.join(directory, item)
                 break
 
-        a_mesg = "no core file found, challenge binary crashed?"
-        assert corefile is not None, a_mesg
+        if corefile is None:
+            l.error("no core file found, challenge binary crashed?")
+            return False
 
         l.debug("found corefile for challenge in file %s", corefile)
 
@@ -214,9 +217,12 @@ class CGCPovTester(object):
             if reg == "eip":
                 set_ip_value = val
 
-        assert set_ip_value is not None, "eip's value not found in core file"
-        a_mesg = "%s's value not found in core file" % register
-        assert set_reg_value is not None, a_mesg
+        if set_ip_value is None:
+            l.error("eip's value not found in core file")
+            return False
+        if set_reg_value is None:
+            l.error("%s's value not found in core file", register)
+            return False
 
         l.debug("register value set to: %#x", set_reg_value)
         l.debug("ip value set to: %#x", set_ip_value)
