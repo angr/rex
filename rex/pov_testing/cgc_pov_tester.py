@@ -22,7 +22,7 @@ class CGCPovTester(object):
         self.expected_type = expected_type
         self.expected_register = expected_register
 
-    def test_binary_pov(self, pov_filename, cb_path):
+    def test_binary_pov(self, pov_filename, cb_path, enable_randomness=True):
         # Test the binary pov
 
         # create the communication pipes
@@ -61,7 +61,11 @@ class CGCPovTester(object):
             os.dup2(challenge_w, 1)  # write to the pov
             os.dup2(devnull.fileno(), 2)  # silence segfault message
 
-            argv = [qemu_path, "-magicdump", "magic", cb_path]
+            if enable_randomness:
+                seed = str(random.randint(0, 100000))
+                argv = [qemu_path, "-seed", seed, "-magicdump", "magic", cb_path]
+            else:
+                argv = [qemu_path, "-magicdump", "magic", cb_path]
             os.execve(qemu_path, argv, os.environ)
 
             assert False, "failed to execute target binary %s" % cb_path
