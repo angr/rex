@@ -1,3 +1,4 @@
+import random
 import logging
 import tempfile
 import itertools
@@ -17,6 +18,9 @@ l.setLevel("DEBUG")
 
 NUM_CGC_BITS = 20
 CGC_GENERAL_REGS = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
+_PREFILTER_BYTES = {"0", "1", "A", "B", "\xff", "\x00"}
+_PREFILTER_BYTES.update(chr(random.randint(0, 255)) for _ in range(10))
+_PREFILTER_BYTES = set(ord(c) for c in _PREFILTER_BYTES)
 
 
 class ByteAnalysis(object):
@@ -113,7 +117,11 @@ class Type1CrashFuzzer(object):
         self.pool = Pool(processes=8)
         # for each byte of input we will try all possible characters and determine how they change bits in the registers
         for i in range(0, len(self.crash)):
-            self.analyze_bytes([i])
+            interesting = self.analyze_bytes([i])
+            if not interesting:
+                interesting = self.check_for_multiple(i)
+            if interesting and self.exploitable():
+                break
         self.pool.close()
 
     @staticmethod
@@ -128,7 +136,7 @@ class Type1CrashFuzzer(object):
             s = s[:i] + to_rep + s[i+len_to_remove:]
         return s
 
-    def analyze_bytes(self, byte_indices, check_for_copies=True):
+    def analyze_bytes(self, byte_indices):
         if any(i in self.skip_bytes for i in byte_indices):
             return False
         if frozenset(set(byte_indices)) in self.skip_sets:
@@ -144,11 +152,40 @@ class Type1CrashFuzzer(object):
         bytes_that_dont_affect_regs = set()
         bytes_that_affect_regs = set()
 
+        # run on the prefilter
         binary_input_bytes = []
-        for i in xrange(256):
+        for i in _PREFILTER_BYTES:
             test_input = self._replace_indices(self.crash, chr(i), byte_indices)
             binary_input_bytes.append((self.binary, test_input, chr(i)))
-        it = self.pool.imap(_get_reg_vals, binary_input_bytes, chunksize=4)
+        it = self.pool.imap_unordered(_get_reg_vals, binary_input_bytes)
+        for c, reg_vals in it:
+            if reg_vals is not None:
+                bytes_to_regs[c] = reg_vals
+            else:
+                bytes_that_dont_crash.add(c)
+        for c in sorted(bytes_to_regs.keys()):
+            reg_vals = bytes_to_regs[c]
+            num_diff = 0
+            for r in reg_vals.keys():
+                if reg_vals[r] != self.orig_regs[r]:
+                    num_diff += 1
+
+            if num_diff == 0:
+                bytes_that_dont_affect_regs.add(c)
+            elif num_diff > 1 and reg_vals["eip"] != self.orig_regs["eip"] and \
+                    self._p.loader.main_bin.contains_addr(reg_vals["eip"]):
+                bytes_that_change_crash.add(c)
+            else:
+                bytes_that_affect_regs.add(c)
+        if len(bytes_that_affect_regs) == 0:
+            return False
+
+        for i in xrange(256):
+            if i in _PREFILTER_BYTES:
+                continue
+            test_input = self._replace_indices(self.crash, chr(i), byte_indices)
+            binary_input_bytes.append((self.binary, test_input, chr(i)))
+        it = self.pool.imap_unordered(_get_reg_vals, binary_input_bytes, chunksize=4)
         for c, reg_vals in it:
             if reg_vals is not None:
                 bytes_to_regs[c] = reg_vals
@@ -174,6 +211,9 @@ class Type1CrashFuzzer(object):
                 bytes_that_change_crash.add(c)
             else:
                 bytes_that_affect_regs.add(c)
+
+        l.debug("%d bytes don't crash, %d bytes don't affect regs",
+                len(bytes_that_dont_crash), len(bytes_that_dont_affect_regs))
 
         # the goal here is to find which bits of regs are contolled here
         all_reg_vals = defaultdict(set)
@@ -256,25 +296,26 @@ class Type1CrashFuzzer(object):
                     byte_analysis.register_bitmasks[reg] = controlled_bits
                     found_interesting = True
 
-        if not found_interesting and len(byte_indices) == 1 and check_for_copies:
-            # we will look for if the same pattern has to be somewhere else in the payload
-            byte_index = byte_indices[0]
-            substr = self.crash[byte_index:byte_index+3]
-            if len(substr) > 2 and self.crash.count(substr) > 1:
-                all_starts = list(self._str_find_all(self.crash, substr))
-                if len(all_starts) == 1:
-                    return
-                strs = [self.crash[i:] for i in all_starts]
-                common_len = len(self._longest_common_prefix(strs))
-                for i in range(common_len):
-                    found_interesting = self.analyze_bytes([start+i for start in all_starts], check_for_copies=False)
-                    if not found_interesting:
-                        for j in range(i, common_len):
-                            self.skip_sets.add(frozenset(start + j for start in all_starts))
-                        break
-                    else:
-                        self.skip_bytes.update(start + i for start in all_starts)
+        return found_interesting
 
+    def check_for_multiple(self, byte_index):
+        found_interesting = False
+        # we will look for if the same pattern has to be somewhere else in the payload
+        substr = self.crash[byte_index:byte_index+3]
+        if len(substr) > 2 and self.crash.count(substr) > 1:
+            all_starts = list(self._str_find_all(self.crash, substr))
+            if len(all_starts) == 1:
+                return
+            strs = [self.crash[i:] for i in all_starts]
+            common_len = len(self._longest_common_prefix(strs))
+            for i in range(common_len):
+                found_interesting = self.analyze_bytes([start+i for start in all_starts])
+                if not found_interesting:
+                    for j in range(i, common_len):
+                        self.skip_sets.add(frozenset(start + j for start in all_starts))
+                    break
+                else:
+                    self.skip_bytes.update(start + i for start in all_starts)
         return found_interesting
 
     @staticmethod
@@ -352,13 +393,13 @@ class Type1CrashFuzzer(object):
         max_val = min(base**(max_working+1)-1, 0x7fffffff)
         if max_val < int("1"*NUM_CGC_BITS, 2):
             l.warning("max_val too small to use as a type1")
-            return True
+            return False
 
         self.regs_to_numbers[reg] = set()
         for i in byte_indices:
             num_str = NumberStr(min_working, max_working, i, i + current_len, max_val, base)
             self.regs_to_numbers[reg].add(num_str)
-        return False
+        return True
 
     def _reg_is_controlled(self, reg):
         if reg in self.regs_to_numbers:
