@@ -136,7 +136,7 @@ class Crash(object):
         :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
         '''
 
-        return self.crash_type == Vulnerability.ARBITRARY_READ
+        return self.crash_type in [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
 
     def exploit(self, **kwargs):
         '''
@@ -166,6 +166,14 @@ class Crash(object):
 
         assert self.violating_action is not None
 
+        if self.crash_type in [Vulnerability.ARBITRARY_READ]:
+            self._explore_arbitrary_read(path_file)
+        elif self.crash_type in [Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]:
+            self._explore_arbitrary_write(path_file)
+        else:
+            raise ValueError("unknown explorable crash type: %s", self.crash_type)
+
+    def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a symbolic memory region
 
         # XXX: which symbolic region do we pick do we choose to point it to?
@@ -180,7 +188,9 @@ class Crash(object):
             l.debug("unable to find a symbolic memory region to set violating address to, setting to non-writable region")
             max_addr = self.project.loader.min_addr()
 
-        self.state.add_constraints(self.violating_action.addr == max_addr)
+        read_addr = max_addr
+        self.state.add_constraints(self.violating_action.addr == read_addr)
+        l.debug("constraining input to read from address %#x", read_addr)
 
         l.info("starting a new crash exploration phase based off the crash at address 0x%x", self.violating_action.ins_addr)
 
@@ -191,6 +201,41 @@ class Crash(object):
                 f.write(new_input)
 
         # create a new crash object starting here
+        self.__init__(self.binary, new_input, constrained_addrs=self.constrained_addrs + [self.violating_action])
+
+    def _explore_arbitrary_write(self, path_file=None):
+        # crash type was an arbitrary-write, this routine doesn't care about taking advantage of the write
+        # it just wants to try to find a more valuable crash by pointing the write at some writable memory
+
+        # find a writable data segment
+
+        elf_objects = self.project.loader.all_elf_objects
+
+        assert len(elf_objects) > 0, "target binary is not ELF or CGC, unsupported by rex"
+
+        chosen_segment = None
+        for eobj in elf_objects:
+            for segment in eobj.segments:
+                if segment.is_writable:
+                    chosen_segment = segment
+                    break
+            if chosen_segment is not None:
+                break
+
+        assert chosen_segment is not None, "unable to find a writable segment, TODO: look through dynamically allocd mem"
+
+        write_addr = chosen_segment.min_addr
+        self.state.add_constraints(self.violating_action.addr == write_addr)
+        l.debug("constraining input to write to address %#x", write_addr)
+
+        l.info("starting a new crash exploration phase based off the crash at address %#x", self.violating_action.ins_addr)
+
+        new_input = self.state.posix.dumps(0)
+        if path_file is not None:
+            l.info("dumping new crash evading input into file '%s'", path_file)
+            with open(path_file, 'w') as f:
+                f.write(new_input)
+
         self.__init__(self.binary, new_input, constrained_addrs=self.constrained_addrs + [self.violating_action])
 
     def copy(self):
@@ -259,7 +304,7 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        for a in self.prev.state.log.actions:
+        for a in list(self.prev.state.log.actions) + list(self.state.log.actions):
             if a.type == 'mem':
                 if self.state.se.symbolic(a.addr):
                     symbolic_actions.append(a)
