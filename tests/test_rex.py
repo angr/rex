@@ -116,11 +116,11 @@ def test_cpp_vptr_smash():
 
     # make sure the test succeeds on every register setter
     for reg in arsenal.register_setters:
-        nose.tools.assert_true(arsenal.register_setters[reg].test())
+        nose.tools.assert_true(arsenal.register_setters[reg].test_binary())
 
     # make sure the test succeeds on every leaker
     for leaker in arsenal.leakers:
-        nose.tools.assert_true(leaker.test())
+        nose.tools.assert_true(leaker.test_binary())
 
 def test_linux_stacksmash():
     '''
@@ -212,7 +212,7 @@ def test_cgc_type1_rop_stacksmash():
 
     # make sure the test succeeds on every leaker
     for leaker in exploit.leakers:
-        nose.tools.assert_true(leaker.test())
+        nose.tools.assert_true(leaker.test_binary())
 
 def run_all():
     functions = globals()
