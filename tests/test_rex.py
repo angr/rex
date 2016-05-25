@@ -9,13 +9,54 @@ bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ", "").decode('hex')
 
 
+def test_legit_00001():
+    '''
+    Test exploitation of legit_00001 given a good crash.
+    '''
+
+    crash = '1002000041414141414141414141414d41414141414141414141414141414141001041414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141412a4141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141604141414141414141414102ffffff410080ffff4141410d807f412641414141414141414141414141414141414141413b41415f414141412b41414141417f4141414141412441414141416041f8414141414141c1414139410010000200005541415f4141b9b9b9b1b9d4b9b9b9b99cb99ec4b9b9b941411f4141414141414114414141514141414141414141414141454141494141414141414141404141414141414d414124a0414571717171717171717171717171717171616161616161616161616161616161006161515e41414141412041414141412125414141304141492f41414141492f4141414541412c4141410037373737373737373737414141414141413a41c4b9b9b9b901b9413c41414141414141414141414141412133414141414141412f414141414141414164414141414141414141414141417f41414100010000000055414b4100124141414141414141'.decode('hex')
+
+    crash = rex.Crash(os.path.join(bin_location, "defcon24/legit_00001"), crash)
+
+    arsenal = crash.exploit()
+
+    nose.tools.assert_true(len(arsenal.register_setters) >= 8)
+    nose.tools.assert_true(len(arsenal.leakers) >= 1)
+
+    for reg in arsenal.register_setters:
+        nose.tools.assert_true(arsenal.register_setters[reg].test_binary())
+
+    for leaker in arsenal.leakers:
+        nose.tools.assert_true(leaker.test_binary())
+
+def test_legit_00003():
+    '''
+    Test exploration and exploitation fo legit_00003.
+    '''
+
+    crash = "1\n" + "A" * 200
+    crash = rex.Crash(os.path.join(bin_location, "defcon24/legit_00003"), crash)
+
+    nose.tools.assert_true(crash.explorable())
+    nose.tools.assert_equals(crash.crash_type, Vulnerability.WRITE_WHAT_WHERE)
+
+    crash.explore()
+
+    arsenal = crash.exploit()
+
+    nose.tools.assert_true(len(arsenal.register_setters) >= 8)
+    nose.tools.assert_true(len(arsenal.leakers) >= 1)
+
+    for reg in arsenal.register_setters:
+        nose.tools.assert_true(arsenal.register_setters[reg].test_binary())
+
+    for leaker in arsenal.leakers:
+        nose.tools.assert_true(leaker.test_binary())
+
 def test_shellcode_placement():
     '''
     Test that shellcode is placed in only executable memory regions.
     '''
-
-    import logging
-    logging.getLogger("tracer").setLevel("DEBUG")
 
     crash = "A" * 272
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/shellcode_tester"), crash)
