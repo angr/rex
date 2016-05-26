@@ -24,7 +24,10 @@ def test_legit_00001():
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
 
     for reg in arsenal.register_setters:
-        nose.tools.assert_true(arsenal.register_setters[reg].test_binary())
+        results = [ ]
+        for _ in range(5):
+            results.append(arsenal.register_setters[reg].test_binary())
+        nose.tools.assert_true(any(results))
 
     for leaker in arsenal.leakers:
         nose.tools.assert_true(leaker.test_binary())
