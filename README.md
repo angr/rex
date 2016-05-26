@@ -2,10 +2,10 @@
 
 At the moment rex offers a couple of features, crash triaging, crash exploration, and exploitation for certain kinds of crashes.
 
-In the example below, we take a crashing input for `legit_00003` discovered by AFL. The vulnerability is a simple buffer overflow on the stack, however, before the vulnerable returns it calls memcpy with a destination parameter which was overwritten during the stack smash.
-While Rex doesn't know how to exploit an arbitrary memcpy call (yet), it can be told to explore the crash until it finds an exploitation primitive which it knows how to exploit.
+In the example below, we take a crashing input for `legit_00003` discovered by AFL. The vulnerability is a simple buffer overflow on the stack, however, before the vulnerable function returns it calls memcpy with a destination parameter which was overwritten during the stack smash.
+While rex doesn't know how to exploit an arbitrary memcpy call (yet), it can be told to explore the crash until it finds an exploitation primitive which it knows how to exploit.
 
-Exploit objects can take an crashing input and will attempt to turn it into an exploit which can set every register and leak data from an arbitrary address.
+Exploit objects can take a crashing input and will attempt to turn it into an exploit which can set every register and leak data from an arbitrary address.
 
 ```python
 # triage a crash
@@ -28,7 +28,7 @@ True
 >>> len(arsenal.leakers)
 1
 # exploits are graded based on reliability, and what kind of defenses they can
-# bypass
+# bypass, the two best exploits put in the 'best_type1' and 'best_type2' attributes
 >>> arsenal.best_type1.register
 'esi'
 # exploits can be dumped in C, Python, or as a compiled POV
