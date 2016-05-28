@@ -9,7 +9,7 @@ import tracer
 import hashlib
 from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
-from simuvex import s_options as so
+from simuvex import SimMemoryError, s_options as so
 
 class NonCrashingInput(Exception):
     pass
@@ -330,3 +330,58 @@ class Crash(object):
                 self.violating_action = sym_action
 
         return
+
+### CLASS METHODS
+    @classmethod
+    def quick_triage(cls, binary, crash):
+        """
+        Quickly triage a crash with just QEMU. Less accurate, but much faster.
+        :param binary: path to binary which crashed
+        :param crash: input which caused crash
+        :return: a vulnerability classification, or None if crash could not be classified
+        """
+
+        r = tracer.Runner(binary, crash)
+        if not r.crash_mode:
+            raise NonCrashingInput("input did not cause a crash")
+
+        if r.os != "cgc":
+            raise ValueError("quick_triage is only available for CGC binaries")
+
+        # triage the crash based of the register values and memory at crashtime
+        # look for the most valuable crashes first
+
+        pc = r.reg_vals['eip']
+
+        # was ip mapped?
+        try:
+            perms = r.memory.permissions(pc)
+            # check if the execute bit is marked, this is an AST
+            if not ((perms & 4) == 4).args[0]:
+                return Vulnerability.IP_OVERWRITE
+
+        except SimMemoryError:
+            return Vulnerability.IP_OVERWRITE
+
+        # wasn't an ip overwrite, check reads and writes
+        project = angr.Project(binary)
+        start_state = project.factory.entry_state(addr=pc)
+        pth = project.factory.path(start_state)
+        next_pth = pth.step(num_inst=1)[0]
+
+        posit = None
+        for a in next_pth.actions:
+            if a.type == 'mem':
+
+                # we will take the last memory action, so things like an `add` instruction
+                # are triaged as a 'write' opposed to a 'read'
+                if a.action == 'write':
+                    posit = Vulnerability.WRITE_WHAT_WHERE
+                elif a.action == 'read':
+                    posit = Vulnerability.ARBITRARY_READ
+                else:
+                    # sanity checking
+                    raise ValueError("unrecognized memory action encountered %s" % a.action)
+
+        # returning None is okay
+        return posit
