@@ -341,6 +341,7 @@ class Crash(object):
         :return: a vulnerability classification, or None if crash could not be classified
         """
 
+        l.debug("quick triaging crash against '%s'", binary)
         r = tracer.Runner(binary, crash)
         if not r.crash_mode:
             raise NonCrashingInput("input did not cause a crash")
@@ -352,17 +353,19 @@ class Crash(object):
         # look for the most valuable crashes first
 
         pc = r.reg_vals['eip']
-
+        l.debug("checking if ip register points to executable memory")
         # was ip mapped?
         try:
             perms = r.memory.permissions(pc)
             # check if the execute bit is marked, this is an AST
-            if not ((perms & 4) == 4).args[0]:
+            l.debug("ip points to mapped memory")
+            if not perms.symbolic and not ((perms & 4) == 4).args[0]:
                 return Vulnerability.IP_OVERWRITE
 
         except SimMemoryError:
             return Vulnerability.IP_OVERWRITE
 
+        l.debug("checking if a read or write caused the crash")
         # wasn't an ip overwrite, check reads and writes
         project = angr.Project(binary)
         start_state = project.factory.entry_state(addr=pc)
@@ -376,12 +379,17 @@ class Crash(object):
                 # we will take the last memory action, so things like an `add` instruction
                 # are triaged as a 'write' opposed to a 'read'
                 if a.action == 'write':
+                    l.debug("write detected")
                     posit = Vulnerability.WRITE_WHAT_WHERE
                 elif a.action == 'read':
+                    l.debug("read detected")
                     posit = Vulnerability.ARBITRARY_READ
                 else:
                     # sanity checking
                     raise ValueError("unrecognized memory action encountered %s" % a.action)
+
+        if posit is None:
+            l.debug("crash was not able to be triaged")
 
         # returning None is okay
         return posit
