@@ -255,8 +255,7 @@ class Crash(object):
 
 ### UTIL
 
-    @staticmethod
-    def _symbolic_control(ast):
+    def _symbolic_control(self, st):
         '''
         determine the amount of symbolic bits in an ast, useful to determining how much control we have
         over registers
@@ -264,14 +263,11 @@ class Crash(object):
 
         sbits = 0
 
-        # XXX assumes variables will always obey the same naming convention
-        # the variable's bit size must be the string after the final '_' character
-        for var in ast.variables:
-            idx = var.rindex("_")
-            sbits += int(var[idx+1:])
+        for bitidx in xrange(self.state.arch.bits):
+            if st[bitidx].symbolic:
+                sbits += 1
 
         return sbits
-
 
     def _triage_crash(self):
         ip = self.state.regs.ip
@@ -349,25 +345,39 @@ class Crash(object):
         if r.os != "cgc":
             raise ValueError("quick_triage is only available for CGC binaries")
 
+        project = angr.Project(binary)
         # triage the crash based of the register values and memory at crashtime
         # look for the most valuable crashes first
 
         pc = r.reg_vals['eip']
         l.debug("checking if ip register points to executable memory")
         # was ip mapped?
+        ip_overwritten = False
         try:
             perms = r.memory.permissions(pc)
             # check if the execute bit is marked, this is an AST
             l.debug("ip points to mapped memory")
             if not perms.symbolic and not ((perms & 4) == 4).args[0]:
-                return Vulnerability.IP_OVERWRITE
+                ip_overwritten = True
 
         except SimMemoryError:
+            ip_overwritten = True
+
+        if ip_overwritten:
+            # let's see if we can classify it as a partial overwrite
+            # this is done by seeing if the most signifigant bytes of
+            # pc could be a mapping
+            cgc_object = project.loader.all_elf_objects[0]
+            base = cgc_object.get_min_addr() & 0xff000000
+            while base < cgc_object.get_max_addr():
+                if pc & 0xff000000 == base:
+                    return Vulnerability.PARTIAL_IP_OVERWRITE
+                base += 0x01000000
+
             return Vulnerability.IP_OVERWRITE
 
         l.debug("checking if a read or write caused the crash")
         # wasn't an ip overwrite, check reads and writes
-        project = angr.Project(binary)
         start_state = project.factory.entry_state(addr=pc)
         pth = project.factory.path(start_state)
         next_pth = pth.step(num_inst=1)[0]
