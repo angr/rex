@@ -14,7 +14,6 @@ import logging
 
 l = logging.getLogger("rex.pov_testing.cgc_pov_tester")
 
-
 class CGCPovTester(object):
     registers = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
 
@@ -24,6 +23,19 @@ class CGCPovTester(object):
 
     def test_binary_pov(self, pov_filename, cb_path, enable_randomness=True):
         # Test the binary pov
+
+        # sanity checks
+        if not os.path.isfile(pov_filename):
+            raise ValueError("pov is does not exist")
+
+        if not os.access(pov_filename, os.X_OK):
+            raise ValueError("pov is not executable")
+
+        if not os.path.isfile(cb_path):
+            raise ValueError("cb does not exist")
+
+        if not os.access(cb_path, os.X_OK):
+            raise ValueError("cb is not executable")
 
         # create the communication pipes
         pov_r, pov_w = os.pipe()
@@ -108,9 +120,6 @@ class CGCPovTester(object):
 
         # clean up test directory
         shutil.rmtree(directory)
-
-        # remove compiled pov
-        os.remove(pov_filename)
 
         return result
 
