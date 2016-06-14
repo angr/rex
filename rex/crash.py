@@ -400,6 +400,7 @@ class Crash(object):
 
         if posit is None:
             l.debug("crash was not able to be triaged")
+            posit = 'unknown'
 
-        # returning None is okay
+        # returning 'unknown' if crash does not fall into one of our obvious categories
         return posit
