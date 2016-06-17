@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import random
 import struct
@@ -96,7 +97,9 @@ class CGCPovTester(object):
             # file descriptor 3 is the negotiation server
             os.dup2(negotiation_pov.fileno(), 3)
 
-            os.execve(qemu_path, [qemu_path, pov_filename], os.environ)
+            seed = str(random.randint(0, 100000))
+            sys.stderr.write("SEED: " + str(seed) + "\n")
+            os.execve(qemu_path, [qemu_path, "-seed", seed, pov_filename], os.environ)
 
         # clean up the pipes in the host
         os.close(challenge_r)
