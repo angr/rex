@@ -272,15 +272,21 @@ class CGCPovTester(object):
 
         type2_vals = [region_addr, region_size, read_size]
         type2_vals_elems = map(lambda x: struct.pack("<I", x), type2_vals)
+        l.debug("sent off type2 params (%#x, %#x, %#x)", region_addr, region_size, read_size)
         negotiation_pipe.send(''.join(type2_vals_elems))
 
         # receive the leaked flag data
         flag_data = negotiation_pipe.recv(read_size)
 
-        # wait for the challenge to exit
-        os.waitpid(challenge_bin_pid, 0)
+        l.debug("received flag data %#x", struct.unpack("<I", flag_data)[0])
 
         # check if it exists within the region
         magic_data = open(os.path.join(directory, 'magic')).read()
+        succeeded = flag_data in magic_data
 
-        return flag_data in magic_data
+        l.debug("pov successful? %s", succeeded)
+
+        # wait for the challenge to exit
+        os.waitpid(challenge_bin_pid, 0)
+
+        return succeeded
