@@ -8,6 +8,9 @@ bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 
 CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ", "").decode('hex')
 
+import logging
+logging.getLogger("rex").setLevel("DEBUG")
+
 
 def test_legit_00001():
     '''
@@ -271,6 +274,7 @@ def test_quick_triage():
             ("1\n" + "A" * 200, "defcon24/legit_00003", Vulnerability.WRITE_WHAT_WHERE),
             ("0500ffff80ffffff80f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1ffff80f1f1f1ebf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f100de7fff80ffffff800fffffff7ef3ffffffff7fffff80fffffeff09fefefefefe0a57656c63fe6d6520746f2850616c696e64726f6d65204669776465720a0affffffff80ffffe8800fffffff7f230a".decode('hex'), "cgc_scored_event_1/cgc/0b32aa01_01", Vulnerability.IP_OVERWRITE),
             ("A" * 512, "tests/i386/vuln_vptr_smash", Vulnerability.ARBITRARY_READ),
+            ("00ea01ffe7fffffffbe3c0d9d9d9d9d9d9d9d9e6e6e6000000e90beae9e9e9e9e9e9d9e6e6e6000000e9e9e9e9e90000f320e9e9e9e9e9e9e900008000e3e3e3e3e3e3e3e3e3e3e3e3e3d8e3e3e3e3e3d2e3e3e3e3e3e3e9e9e9e97fffe9e9e9e9e9e9f1e9e9e9f6e9e9e9e9e9e9e9e9ebe9e9e9e9e9e9e9e9e9e9e9ffff8080e990e9e9ece9e9e9e9e9e9e9e9e9e9e90000ff20e9e9e9e9e9e9e900008000e3e3e3e3e3e3e3e3e3e3e3e3e3e3dde3e3e3e3e3e3e3e3e3e3e3e9e9e9f27fffe9a9e9e9e9e9f1e9e9e9e9e9e9e9e9e9e9e9e9ebe9e9e9e90080e9e91001e9e9e90000d9d9d9d9d9d9d9d9c2d9dae60200".decode('hex'), "cgc_qualifier_event/cgc/474a5e01_01", Vulnerability.NULL_DEREFERENCE),
     ]
 
     for tup in crash_tuples:
