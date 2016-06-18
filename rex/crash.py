@@ -350,6 +350,10 @@ class Crash(object):
         # look for the most valuable crashes first
 
         pc = r.reg_vals['eip']
+        l.debug("checking if ip is null")
+        if pc == 0:
+            return Vulnerability.NULL_DEREFERENCE
+
         l.debug("checking if ip register points to executable memory")
         # was ip mapped?
         ip_overwritten = False
