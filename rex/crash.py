@@ -19,13 +19,16 @@ class Crash(object):
     Triage a crash using angr.
     '''
 
-    def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None):
+    def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
+                 prev_path=None):
         '''
         :param binary: path to the binary which crashed
         :param crash: string of input which crashed the binary
         :param pov_file: CGC PoV describing a crash
         :param aslr: analyze the crash with aslr on or off
         :param constrained_addrs: list of addrs which have been constrained during exploration
+        :param crash_state: an already traced crash state
+        :param prev_path: path leading up to the crashing block
         '''
 
         self.binary = binary
@@ -58,29 +61,44 @@ class Crash(object):
         else:
             self.aslr = aslr
 
-        # run the tracer, grabbing the crash state
-        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
-                so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS}
-        add_options = {so.REVERSE_MEMORY_NAME_MAP, so.TRACK_ACTION_HISTORY}
-        prev, crash_state = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False, add_options=add_options, remove_options=remove_options).run(constrained_addrs)
         if crash_state is None:
-            l.warning("input did not cause a crash")
-            raise NonCrashingInput
+            # run the tracer, grabbing the crash state
+            remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
+                              so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS}
+            add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
+                           so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES}
+            self._tracer = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False,
+                                         add_options=add_options, remove_options=remove_options)
+            prev, crash_state = self._tracer.run(constrained_addrs)
 
-        l.debug("done tracing input")
-        # a path leading up to the crashing basic block
-        self.prev   = prev
+            if crash_state is None:
+                l.warning("input did not cause a crash")
+                raise NonCrashingInput
 
-        # the state at crash time
-        self.state  = crash_state
+            l.debug("done tracing input")
+            # a path leading up to the crashing basic block
+            self.prev   = prev
+
+            # the state at crash time
+            self.state  = crash_state
+        else:
+            self.state = crash_state
+            self.prev = prev_path
+            self._tracer = None
 
         # list of actions added during exploitation, probably better object for this attribute to belong to
         self.added_actions = [ ]
 
         # hacky trick to get all bytes
-        memory_writes = [ ]
-        for var in self.state.memory.mem._name_mapping.keys():
-            memory_writes.extend(self.state.memory.addrs_for_name(var))
+        #memory_writes = [ ]
+        #for var in self.state.memory.mem._name_mapping.keys():
+        #    memory_writes.extend(self.state.memory.addrs_for_name(var))
+
+        memory_writes = sorted(self.state.memory.mem.get_symbolic_addrs())
+        l.debug("filtering writes")
+        memory_writes = [m for m in memory_writes if m/0x1000 != 0x4347c]
+        memory_writes = [m for m in memory_writes if any("stdin" in v for v in self.state.memory.load(m, 1).variables)]
+        l.debug("done filtering writes")
 
         self.symbolic_mem = { }
 
