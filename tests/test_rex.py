@@ -63,7 +63,6 @@ def test_legit_00003():
     for leaker in arsenal.leakers:
         nose.tools.assert_true(leaker.test_binary())
 
-"""
 def test_controlled_printf():
     '''
     Test ability to turn controlled format string into Type 2 POV.
@@ -83,8 +82,11 @@ def test_controlled_printf():
 
     pov = cg.attempt_pov()
 
-    nose.tools.assert_true(pov.test_binary(enable_randomness=False))
-"""
+    tests = [ ]
+    for _ in range(10):
+        tests.append(pov.test_binary(enable_randomness=False))
+
+    nose.tools.assert_true(any(tests))
 
 def test_shellcode_placement():
     '''
