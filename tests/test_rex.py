@@ -78,7 +78,11 @@ def test_point_to_flag():
 
     cg = colorguard.ColorGuard(binary, flag_leak)
 
-    nose.tools.assert_true(cg.causes_leak)
+    nose.tools.assert_true(cg.causes_leak())
+
+    pov = cg.attempt_pov()
+
+    nose.tools.assert_true(pov.test_binary(enable_randomness=False))
 
 def test_shellcode_placement():
     '''
