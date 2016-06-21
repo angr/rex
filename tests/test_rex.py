@@ -84,6 +84,27 @@ def test_point_to_flag():
 
     nose.tools.assert_true(pov.test_binary(enable_randomness=False))
 
+def test_controlled_printf():
+    '''
+    Test ability to turn controlled format string into Type 2 POV.
+    '''
+
+    crash = "%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%X%x%sAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    binary = os.path.join(bin_location, "tests/i386/controlled_printf")
+    crash = rex.Crash(binary, crash)
+
+    nose.tools.assert_equals(crash.crash_type, Vulnerability.ARBITRARY_READ)
+
+    flag_leak = crash.point_to_flag()
+
+    cg = colorguard.ColorGuard(binary, flag_leak)
+
+    nose.tools.assert_true(cg.causes_leak())
+
+    pov = cg.attempt_pov()
+
+    nose.tools.assert_true(pov.test_binary(enable_randomness=False))
+
 def test_shellcode_placement():
     '''
     Test that shellcode is placed in only executable memory regions.
