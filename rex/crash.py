@@ -191,6 +191,36 @@ class Crash(object):
         else:
             raise ValueError("unknown explorable crash type: %s", self.crash_type)
 
+    def point_to_flag(self, path_file=None):
+        '''
+        Create a testcase which points an arbitrary-read crash at the flag page.
+
+        :param path_file: file to dump testcase to
+        '''
+
+        if not self.crash_type in [Vulnerability.ARBITRARY_READ]:
+            raise CannotExploit("only arbitrary-reads can be exploited this way")
+
+        # iterate over addr seeing if we can find an acceptable address to point to
+        cgc_magic_page_addr = 0x4347c000
+        addr = cgc_magic_page_addr
+        while addr < cgc_magic_page_addr + 0x1000 and \
+            not self.state.se.satisfiable(extra_constraints=(self.violating_action.addr == addr,)):
+            addr += 1
+
+        if addr >= cgc_magic_page_addr + 0x1000:
+            raise CannotExploit("unable to point arbitrary-read at the flag page")
+
+        cp = self.state.copy()
+        cp.add_constraints(self.violating_action.addr == addr)
+        new_input = cp.posix.dumps(0)
+
+        if path_file is not None:
+            with open(path_file, 'w') as f:
+                f.write(new_input)
+
+        return new_input
+
     def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a symbolic memory region
 
