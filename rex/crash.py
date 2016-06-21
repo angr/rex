@@ -156,7 +156,7 @@ class Crash(object):
 
         return self.crash_type in [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
 
-    def exploit(self, **kwargs):
+    def exploit(self, blacklist_symbolic_explore=True, **kwargs):
         '''
         craft an exploit for a crash
         '''
@@ -164,6 +164,12 @@ class Crash(object):
         # crash should have been classified at this point
         if not self.exploitable():
             raise CannotExploit("non-exploitable crash")
+
+        if blacklist_symbolic_explore:
+            if "blacklist_techniques" in kwargs:
+                kwargs["blacklist_techniques"].add("explore_for_exploit")
+            else:
+                kwargs["blacklist_techniques"] = {"explore_for_exploit"}
 
         if self.os == 'cgc':
             exploit = CGCExploitFactory(self, **kwargs)
