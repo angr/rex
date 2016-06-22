@@ -251,6 +251,9 @@ class CGCPovTester(object):
         if not register_set:
             l.warning("Register was not set correctly")
 
+        # clean up the dropped core
+        os.remove(corefile)
+
         return register_set and ip_set
 
     @staticmethod
