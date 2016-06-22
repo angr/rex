@@ -24,13 +24,13 @@ def test_legit_00001():
 
     arsenal = crash.exploit()
 
-    nose.tools.assert_true(len(arsenal.register_setters) >= 8)
+    nose.tools.assert_true(len(arsenal.register_setters) >= 2)
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
 
-    for reg in arsenal.register_setters:
+    for reg_setter in arsenal.register_setters:
         results = [ ]
         for _ in range(5):
-            results.append(arsenal.register_setters[reg].test_binary())
+            results.append(reg_setter.test_binary())
         nose.tools.assert_true(any(results))
 
     for leaker in arsenal.leakers:
@@ -51,13 +51,13 @@ def test_legit_00003():
 
     arsenal = crash.exploit()
 
-    nose.tools.assert_true(len(arsenal.register_setters) >= 8)
+    nose.tools.assert_true(len(arsenal.register_setters) >= 2)
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
 
-    for reg in arsenal.register_setters:
+    for reg_setter in arsenal.register_setters:
         results = [ ]
         for _ in range(5):
-            results.append(arsenal.register_setters[reg].test_binary())
+            results.append(reg_setter.test_binary())
         nose.tools.assert_true(any(results))
 
     for leaker in arsenal.leakers:
@@ -83,7 +83,7 @@ def test_controlled_printf():
     pov = cg.attempt_pov()
 
     tests = [ ]
-    for _ in range(10):
+    for _ in range(5):
         tests.append(pov.test_binary(enable_randomness=False))
 
     nose.tools.assert_true(any(tests))
@@ -98,7 +98,7 @@ def test_shellcode_placement():
 
     arsenal = crash.exploit()
 
-    exploit = arsenal.register_setters['eax']
+    exploit = arsenal.register_setters[0]
 
     # make sure the shellcode was placed into the executable heap page
     heap_top = crash.state.se.any_int(crash.state.cgc.allocation_base)
@@ -134,65 +134,15 @@ def test_cpp_vptr_smash():
     # let's generate some exploits for it
     arsenal = crash.exploit()
 
-    # make sure we have control over these
-    nose.tools.assert_true(arsenal.can_control('eax'))
-    nose.tools.assert_true(arsenal.can_control('ebp'))
-    nose.tools.assert_true(arsenal.can_control('ebx'))
-    nose.tools.assert_true(arsenal.can_control('ecx'))
-    nose.tools.assert_true(arsenal.can_control('edi'))
-    nose.tools.assert_true(arsenal.can_control('edx'))
-    nose.tools.assert_true(arsenal.can_control('esi'))
-    nose.tools.assert_true(arsenal.can_control('esp'))
+    # make sure we have three register setting exploits (one for each technique)
+    nose.tools.assert_true(len(arsenal.register_setters) >= 2)
 
     # make sure we can also generate some leakers, should be rop and shellcode at this point
     nose.tools.assert_true(len(arsenal.leakers) >= 2)
 
-    # make sure our ecx chain actually works (ecx is chosen arbitrarily)
-    ecx_exploit = arsenal.register_setters['ecx']
-
-    c_str = ecx_exploit._chain.payload_str(constraints=(ecx_exploit._value_var == 0x50495a41))
-    c_bvv = ecx_exploit.crash.state.se.BVV(c_str)
-
-    c_mem = ecx_exploit.crash.state.memory.load(ecx_exploit._chain_addr, len(c_str))
-    ecx_exploit.crash.state.add_constraints(c_mem == c_bvv)
-
-    exploited_state = ecx_exploit._windup_state(ecx_exploit.crash.state)
-
-    # make sure there is only one possibility for ecx at this point
-    exploited_ecx_vals = exploited_state.se.any_n_str(exploited_state.regs.ecx, 2)
-    nose.tools.assert_true(len(exploited_ecx_vals) == 1)
-
-    ecx_val = exploited_ecx_vals[0]
-    nose.tools.assert_equal(ecx_val, "PIZA")
-
-    # make sure our leaker exploits writes out the contents
-    leaker_exploit = arsenal.best_type2
-
-    # leak the memory at the binary's base address
-    c_str = leaker_exploit._chain.payload_str(constraints=(leaker_exploit._addr_var == 0x8048000,
-                                                           leaker_exploit._size_var == 0x1000))
-    c_bvv = leaker_exploit.crash.state.se.BVV(c_str)
-
-    c_mem = leaker_exploit.crash.state.memory.load(leaker_exploit._chain_addr, len(c_str))
-    leaker_exploit.crash.state.add_constraints(c_mem == c_bvv)
-
-    exploited_state = leaker_exploit._windup_state(leaker_exploit.crash.state, to_syscall=True)
-    exploited_state.add_constraints(exploited_state.regs.eax == 2)
-    exploited_state.add_constraints(exploited_state.regs.ebx == 1)
-    exploited_state.add_constraints(exploited_state.regs.ecx == 0x8048000)
-    exploited_state.add_constraints(exploited_state.regs.edx == 0x1000)
-    exploited_state.add_constraints(exploited_state.regs.esi == 0)
-
-    ss = leaker_exploit._windup_state(exploited_state)
-
-    leaked = ss.posix.dumps(1)
-    leak_start = leaked.find("\x7fCGC")
-    leaked_header = leaked[leak_start:leak_start+0x10]
-    nose.tools.assert_equals(leaked_header, CGC_HEADER)
-
     # make sure the test succeeds on every register setter
-    for reg in arsenal.register_setters:
-        nose.tools.assert_true(arsenal.register_setters[reg].test_binary())
+    for reg_setter in arsenal.register_setters:
+        nose.tools.assert_true(reg_setter.test_binary())
 
     # make sure the test succeeds on every leaker
     for leaker in arsenal.leakers:
@@ -225,69 +175,18 @@ def test_cgc_type1_rop_stacksmash():
     crash = "0500ffff80ffffff80f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1ffff80f1f1f1ebf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f100de7fff80ffffff800fffffff7ef3ffffffff7fffff80fffffeff09fefefefefe0a57656c63fe6d6520746f2850616c696e64726f6d65204669776465720a0affffffff80ffffe8800fffffff7f230a"
 
     crash = rex.Crash(os.path.join(bin_location, "cgc_scored_event_1/cgc/0b32aa01_01"), crash.decode('hex'))
-    exploit = crash.exploit()
+    arsenal = crash.exploit()
 
     # make sure we can control ecx, edx, ebx, ebp, esi, and edi with rop
-    nose.tools.assert_true(exploit.can_control('ecx'))
-    nose.tools.assert_true(exploit.can_control('edx'))
-    nose.tools.assert_true(exploit.can_control('ebx'))
-    nose.tools.assert_true(exploit.can_control('ebp'))
-    nose.tools.assert_true(exploit.can_control('esi'))
-    nose.tools.assert_true(exploit.can_control('edi'))
-    nose.tools.assert_true(exploit.can_control('eax'))
-    nose.tools.assert_true(exploit.can_control('esp'))
-
-    # make sure our ecx chain actually works (ecx is chosen arbitrarily)
-    ecx_exploit = exploit.register_setters['ecx']
-
-    c_str = ecx_exploit._chain.payload_str(constraints=(ecx_exploit._value_var==0x50495a41))
-    c_bvv = ecx_exploit.crash.state.se.BVV(c_str)
-
-    c_mem = ecx_exploit.crash.state.memory.load(ecx_exploit._chain_addr, len(c_str))
-    ecx_exploit.crash.state.add_constraints(c_mem == c_bvv)
-
-    exploited_state = ecx_exploit._windup_state(ecx_exploit.crash.state)
-
-    # make sure there is only one possibility for ecx at this point
-    exploited_ecx_vals = exploited_state.se.any_n_str(exploited_state.regs.ecx, 2)
-    nose.tools.assert_true(len(exploited_ecx_vals) == 1)
-
-    ecx_val = exploited_ecx_vals[0]
-    nose.tools.assert_equal(ecx_val, "PIZA")
-
-    # TODO test circumstantial and shellcode setters
-
-    # make sure our leaker exploits writes out the contents
-    leaker_exploit = exploit.best_type2
-
-    # leak the memory at the binary's base address
-    c_str = leaker_exploit._chain.payload_str(constraints=(leaker_exploit._addr_var == 0x8048000,
-                                                           leaker_exploit._size_var == 0x1000))
-    c_bvv = leaker_exploit.crash.state.se.BVV(c_str)
-
-    c_mem = leaker_exploit.crash.state.memory.load(leaker_exploit._chain_addr, len(c_str))
-    leaker_exploit.crash.state.add_constraints(c_mem == c_bvv)
-
-    exploited_state = leaker_exploit._windup_state(leaker_exploit.crash.state, to_syscall=True)
-    exploited_state.add_constraints(exploited_state.regs.eax == 2)
-    exploited_state.add_constraints(exploited_state.regs.ebx == 1)
-    exploited_state.add_constraints(exploited_state.regs.ecx == 0x8048000)
-    exploited_state.add_constraints(exploited_state.regs.edx == 0x1000)
-    exploited_state.add_constraints(exploited_state.regs.esi == 0)
-
-    ss = leaker_exploit._windup_state(exploited_state)
-
-    leaked = ss.posix.dumps(1)
-    leak_start = leaked.find("\x7fCGC")
-    leaked_header = leaked[leak_start:leak_start+0x10]
-    nose.tools.assert_equals(leaked_header, CGC_HEADER)
+    nose.tools.assert_true(len(arsenal.register_setters) >= 3)
+    nose.tools.assert_true(len(arsenal.leakers) >= 2)
 
     # make sure the test succeeds on every register setter
-    for reg in exploit.register_setters:
-        nose.tools.assert_true(exploit.register_setters[reg].test_binary())
+    for reg_setter in arsenal.register_setters:
+        nose.tools.assert_true(reg_setter.test_binary())
 
     # make sure the test succeeds on every leaker
-    for leaker in exploit.leakers:
+    for leaker in arsenal.leakers:
         nose.tools.assert_true(leaker.test_binary())
 
 def test_quick_triage():
