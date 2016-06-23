@@ -442,6 +442,17 @@ class Crash(object):
         l.debug("checking if a read or write caused the crash")
         # wasn't an ip overwrite, check reads and writes
         start_state = project.factory.entry_state(addr=pc)
+
+        # set registers
+        start_state.regs.eax = r.reg_vals['eax']
+        start_state.regs.ebx = r.reg_vals['ebx']
+        start_state.regs.ecx = r.reg_vals['ecx']
+        start_state.regs.edx = r.reg_vals['edx']
+        start_state.regs.esi = r.reg_vals['esi']
+        start_state.regs.edi = r.reg_vals['edi']
+        start_state.regs.esp = r.reg_vals['esp']
+        start_state.regs.ebp = r.reg_vals['ebp']
+
         pth = project.factory.path(start_state)
         next_pth = pth.step(num_inst=1)[0]
 
@@ -465,6 +476,7 @@ class Crash(object):
                         perms = r.memory.permissions(target_addr)
                         if not perms.symbolic and not ((perms & 2) == 2).args[0]:
                             l.debug("write attempt at a read-only page, assuming uncontrolled")
+                            __import__("ipdb").set_trace()
                             return Vulnerability.UNCONTROLLED_WRITE
                     except SimMemoryError:
                         pass
