@@ -472,11 +472,16 @@ class Crash(object):
                     posit = Vulnerability.WRITE_WHAT_WHERE
                     # if it's trying to write to a non-writeable address which is mapped
                     # it's most likely uncontrolled
+                    if target_addr & 0xfff00000 == 0:
+                        l.debug("write attempt at a suspiciously small address, assuming uncontrolled")
+                        return Vulnerability.UNCONTROLLED_WRITE
+
                     try:
                         perms = r.memory.permissions(target_addr)
                         if not perms.symbolic and not ((perms & 2) == 2).args[0]:
                             l.debug("write attempt at a read-only page, assuming uncontrolled")
                             return Vulnerability.UNCONTROLLED_WRITE
+
                     except SimMemoryError:
                         pass
 
