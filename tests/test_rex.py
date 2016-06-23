@@ -7,8 +7,6 @@ from rex.vulnerability import Vulnerability
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
 
-CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ", "").decode('hex')
-
 import logging
 logging.getLogger("rex").setLevel("DEBUG")
 
