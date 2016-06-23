@@ -12,6 +12,12 @@ CGC_HEADER = "7f43 4743 0101 0143 014d 6572 696e 6f00".replace(" ", "").decode('
 import logging
 logging.getLogger("rex").setLevel("DEBUG")
 
+def _do_pov_test(pov, enable_randomness=True):
+    ''' Test a POV '''
+    for _ in range(10):
+        if pov.test_binary(enable_randomness=enable_randomness):
+            return True
+    return False
 
 def test_legit_00001():
     '''
@@ -28,13 +34,10 @@ def test_legit_00001():
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
 
     for reg_setter in arsenal.register_setters:
-        results = [ ]
-        for _ in range(5):
-            results.append(reg_setter.test_binary())
-        nose.tools.assert_true(any(results))
+        nose.tools.assert_true(_do_pov_test(reg_setter))
 
     for leaker in arsenal.leakers:
-        nose.tools.assert_true(leaker.test_binary())
+        nose.tools.assert_true(_do_pov_test(leaker))
 
 def test_legit_00003():
     '''
@@ -55,13 +58,10 @@ def test_legit_00003():
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
 
     for reg_setter in arsenal.register_setters:
-        results = [ ]
-        for _ in range(5):
-            results.append(reg_setter.test_binary())
-        nose.tools.assert_true(any(results))
+        nose.tools.assert_true(_do_pov_test(reg_setter))
 
     for leaker in arsenal.leakers:
-        nose.tools.assert_true(leaker.test_binary())
+        nose.tools.assert_true(_do_pov_test(leaker))
 
 def test_controlled_printf():
     '''
@@ -82,11 +82,7 @@ def test_controlled_printf():
 
     pov = cg.attempt_pov()
 
-    tests = [ ]
-    for _ in range(5):
-        tests.append(pov.test_binary(enable_randomness=False))
-
-    nose.tools.assert_true(any(tests))
+    nose.tools.assert_true(_do_pov_test(pov, enable_randomness=False))
 
 def test_shellcode_placement():
     '''
@@ -142,11 +138,11 @@ def test_cpp_vptr_smash():
 
     # make sure the test succeeds on every register setter
     for reg_setter in arsenal.register_setters:
-        nose.tools.assert_true(reg_setter.test_binary())
+        nose.tools.assert_true(_do_pov_test(reg_setter))
 
     # make sure the test succeeds on every leaker
     for leaker in arsenal.leakers:
-        nose.tools.assert_true(leaker.test_binary())
+        nose.tools.assert_true(_do_pov_test(leaker))
 
 def test_linux_stacksmash():
     '''
@@ -183,11 +179,11 @@ def test_cgc_type1_rop_stacksmash():
 
     # make sure the test succeeds on every register setter
     for reg_setter in arsenal.register_setters:
-        nose.tools.assert_true(reg_setter.test_binary())
+        nose.tools.assert_true(_do_pov_test(reg_setter))
 
     # make sure the test succeeds on every leaker
     for leaker in arsenal.leakers:
-        nose.tools.assert_true(leaker.test_binary())
+        nose.tools.assert_true(_do_pov_test(leaker))
 
 def test_quick_triage():
     '''
@@ -200,6 +196,7 @@ def test_quick_triage():
             ("0500ffff80ffffff80f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1ffff80f1f1f1ebf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f100de7fff80ffffff800fffffff7ef3ffffffff7fffff80fffffeff09fefefefefe0a57656c63fe6d6520746f2850616c696e64726f6d65204669776465720a0affffffff80ffffe8800fffffff7f230a".decode('hex'), "cgc_scored_event_1/cgc/0b32aa01_01", Vulnerability.IP_OVERWRITE),
             ("A" * 512, "tests/i386/vuln_vptr_smash", Vulnerability.ARBITRARY_READ),
             ("00ea01ffe7fffffffbe3c0d9d9d9d9d9d9d9d9e6e6e6000000e90beae9e9e9e9e9e9d9e6e6e6000000e9e9e9e9e90000f320e9e9e9e9e9e9e900008000e3e3e3e3e3e3e3e3e3e3e3e3e3d8e3e3e3e3e3d2e3e3e3e3e3e3e9e9e9e97fffe9e9e9e9e9e9f1e9e9e9f6e9e9e9e9e9e9e9e9ebe9e9e9e9e9e9e9e9e9e9e9ffff8080e990e9e9ece9e9e9e9e9e9e9e9e9e9e90000ff20e9e9e9e9e9e9e900008000e3e3e3e3e3e3e3e3e3e3e3e3e3e3dde3e3e3e3e3e3e3e3e3e3e3e9e9e9f27fffe9a9e9e9e9e9f1e9e9e9e9e9e9e9e9e9e9e9e9ebe9e9e9e90080e9e91001e9e9e90000d9d9d9d9d9d9d9d9c2d9dae60200".decode('hex'), "cgc_qualifier_event/cgc/474a5e01_01", Vulnerability.NULL_DEREFERENCE),
+            ("6675e263640a6e65777a64656c6976657265720a25642525252525252525252525252525257373732525252525252525620a0a0a160a6e6577a670697a7a610a646572656465656c6376300a0a0a0a0a64656c69766572658110006c6976657065720a0a0a8a304a0a0a0a0a64656c697665726564720a720a0a937a770a0a0a0f64656c6976657265720a0a0a8a6e7a5800110f64656c6976657265".decode('hex'), "shellphish/PIZZA_00002", Vulnerability.NULL_DEREFERENCE),
     ]
 
     for tup in crash_tuples:

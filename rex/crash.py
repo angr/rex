@@ -476,7 +476,6 @@ class Crash(object):
                         perms = r.memory.permissions(target_addr)
                         if not perms.symbolic and not ((perms & 2) == 2).args[0]:
                             l.debug("write attempt at a read-only page, assuming uncontrolled")
-                            __import__("ipdb").set_trace()
                             return Vulnerability.UNCONTROLLED_WRITE
                     except SimMemoryError:
                         pass
