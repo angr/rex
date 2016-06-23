@@ -405,6 +405,7 @@ class Crash(object):
         # look for the most valuable crashes first
 
         pc = r.reg_vals['eip']
+        l.debug('crash occured at %#x', pc)
         l.debug("checking if ip is null")
         if pc == 0:
             return Vulnerability.NULL_DEREFERENCE
@@ -417,7 +418,8 @@ class Crash(object):
             # check if the execute bit is marked, this is an AST
             l.debug("ip points to mapped memory")
             if not perms.symbolic and not ((perms & 4) == 4).args[0]:
-                ip_overwritten = True
+                l.debug("ip appears to be uncontrolled")
+                return Vulnerability.UNCONTROLLED_IP_OVERWRITE
 
         except SimMemoryError:
             ip_overwritten = True
@@ -430,9 +432,11 @@ class Crash(object):
             base = cgc_object.get_min_addr() & 0xff000000
             while base < cgc_object.get_max_addr():
                 if pc & 0xff000000 == base:
+                    l.debug("ip appears to only be partially controlled")
                     return Vulnerability.PARTIAL_IP_OVERWRITE
                 base += 0x01000000
 
+            l.debug("ip appears to be completely controlled")
             return Vulnerability.IP_OVERWRITE
 
         l.debug("checking if a read or write caused the crash")
@@ -445,11 +449,26 @@ class Crash(object):
         for a in next_pth.actions:
             if a.type == 'mem':
 
+                target_addr = start_state.se.any_int(a.addr)
+                if target_addr < 0x1000:
+                    l.debug("attempt to write or read to address of NULL")
+                    return Vulnerability.NULL_DEREFERENCE
+
                 # we will take the last memory action, so things like an `add` instruction
                 # are triaged as a 'write' opposed to a 'read'
                 if a.action == 'write':
                     l.debug("write detected")
                     posit = Vulnerability.WRITE_WHAT_WHERE
+                    # if it's trying to write to a non-writeable address which is mapped
+                    # it's most likely uncontrolled
+                    try:
+                        perms = r.memory.permissions(target_addr)
+                        if not perms.symbolic and not ((perms & 2) == 2).args[0]:
+                            l.debug("write attempt at a read-only page, assuming uncontrolled")
+                            return Vulnerability.UNCONTROLLED_WRITE
+                    except SimMemoryError:
+                        pass
+
                 elif a.action == 'read':
                     l.debug("read detected")
                     posit = Vulnerability.ARBITRARY_READ
