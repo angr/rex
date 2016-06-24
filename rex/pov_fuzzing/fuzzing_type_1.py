@@ -31,6 +31,7 @@ class ByteAnalysis(object):
         self.bytes_that_change_registers = set()
         self.register_pattern_maps = dict()
         self.register_bitmasks = dict()
+        self.is_complex = False
 
 
 class NumberStr(object):
@@ -64,7 +65,7 @@ def _get_reg_vals(binary_input_byte):
         return [c, None]
     else:
         reg_vals = dict()
-        for reg in CGC_GENERAL_REGS:
+        for reg in CGC_GENERAL_REGS + ["eip"]:
             reg_vals[reg] = r.reg_vals[reg]
         return [c, r.reg_vals]
 
@@ -99,6 +100,7 @@ class Type1CrashFuzzer(object):
         self.used_bytes = set()
         self.byte_translation_funcs = list()
         self.byte_translation_calls = dict()
+        self._bit_patterns = dict()
 
         self.make_bases()
         self.run()
@@ -135,6 +137,21 @@ class Type1CrashFuzzer(object):
         for i in indices:
             s = s[:i] + to_rep + s[i+len_to_remove:]
         return s
+
+    def _get_bit_patterns(self, number_bits, bit_indices):
+        bit_indices = tuple(sorted(bit_indices))
+        if (number_bits, bit_indices) in self._bit_patterns:
+            return set(self._bit_patterns[(number_bits, bit_indices)])
+        all_patterns = set()
+        for i in xrange(2 ** number_bits):
+            pattern = 0
+            for n, index in enumerate(bit_indices):
+                if (1 << n) & i != 0:
+                    pattern |= (1 << index)
+
+            all_patterns.add(pattern)
+        self._bit_patterns[(number_bits, bit_indices)] = set(all_patterns)
+        return all_patterns
 
     def analyze_bytes(self, byte_indices):
         if any(i in self.skip_bytes for i in byte_indices):
@@ -244,22 +261,17 @@ class Type1CrashFuzzer(object):
                     if c == "1":
                         bit_indices.append(31-i)
                 if number_bits > 8:
-                    found_interesting = self.analyze_complex(byte_indices, reg, bytes_to_regs) or found_interesting
-                    break
+                    if self.analyze_complex(byte_indices, reg, bytes_to_regs):
+                        return True
+                    else:
+                        return False
 
                 # might want to check for impossible bit patterns
                 if controlled_bits != 0:
                     # check that all bitmasks are possible for those bits
 
                     # now map the patterns were not possible
-                    all_patterns = set()
-                    for i in range(2**number_bits):
-                        pattern = 0
-                        for n, index in enumerate(bit_indices):
-                            if (1 << n) & i != 0:
-                                pattern |= (1 << index)
-
-                        all_patterns.add(pattern)
+                    all_patterns = self._get_bit_patterns(number_bits, bit_indices)
 
                     byte_analysis.register_pattern_maps[reg] = dict()
 
@@ -290,11 +302,21 @@ class Type1CrashFuzzer(object):
                     else:
                         break
 
-                if controlled_bits != 0:
-                    l.info("Register %s has the following bitmask %s for bytes %s of the input",
-                           reg, hex(controlled_bits), byte_indices)
-                    byte_analysis.register_bitmasks[reg] = controlled_bits
-                    found_interesting = True
+            if controlled_bits != 0:
+                l.info("Register %s has the following bitmask %s for bytes %s of the input",
+                       reg, hex(controlled_bits), byte_indices)
+                byte_analysis.register_bitmasks[reg] = controlled_bits
+                found_interesting = True
+
+        if len(byte_analysis.register_bitmasks) > 1 and "eip" in byte_analysis.register_bitmasks:
+            if bin(self._reg_bits_controlled("eip")).count("1") \
+                    - bin(byte_analysis.register_bitmasks['eip']).count('1') > NUM_CGC_BITS:
+                del byte_analysis.register_bitmasks['eip']
+            else:
+                for reg in dict(byte_analysis.register_bitmasks):
+                    if reg != "eip":
+                        l.debug("removing reg %s as it conflicts with eip", reg)
+                        del(byte_analysis.register_bitmasks[reg])
 
         return found_interesting
 
@@ -365,7 +387,7 @@ class Type1CrashFuzzer(object):
                         break
 
         if len(votes) == 0:
-            l.warning("unkown complex byte")
+            l.warning("unknown complex byte")
             return False
         base, current_len = max(votes.keys(), key=lambda x: votes[x])
         l.debug("chose base %d with max len %d", base, current_len)
@@ -395,11 +417,23 @@ class Type1CrashFuzzer(object):
             l.warning("max_val too small to use as a type1")
             return False
 
+        l.debug("found atoi for reg %s at byte_indices %s", reg, byte_indices)
+
         self.regs_to_numbers[reg] = set()
         for i in byte_indices:
             num_str = NumberStr(min_working, max_working, i, i + current_len, max_val, base)
             self.regs_to_numbers[reg].add(num_str)
         return True
+
+    def _reg_bits_controlled(self, reg):
+        if reg in self.regs_to_numbers:
+            return 0xffffffff
+        reg_bitmasks = defaultdict(int)
+        for byte_analysis in self.byte_analysis.values():
+            if reg in byte_analysis.register_bitmasks:
+                reg_bitmasks[reg] |= byte_analysis.register_bitmasks[reg]
+
+        return reg_bitmasks[reg]
 
     def _reg_is_controlled(self, reg):
         if reg in self.regs_to_numbers:

