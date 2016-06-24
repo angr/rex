@@ -7,12 +7,16 @@ import signal
 import resource
 import tempfile
 
+from threading import Timer
+
 import angr
 import tracer
+
 
 import logging
 
 l = logging.getLogger("rex.pov_testing.cgc_pov_tester")
+
 
 class CGCPovTester(object):
     registers = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
@@ -21,7 +25,21 @@ class CGCPovTester(object):
         self.expected_type = expected_type
         self.expected_register = expected_register
 
-    def test_binary_pov(self, pov_filename, cb_path, enable_randomness=True):
+    @staticmethod
+    def _wait_pid_timeout(pid, options, timeout):
+        def kill_proc(p):
+            os.kill(p, signal.SIGKILL)
+
+        timer = Timer(timeout, kill_proc, [pid])
+        try:
+            timer.start()
+            return os.waitpid(pid, options)
+        except OSError:
+            return 0, 0
+        finally:
+            timer.cancel()
+
+    def test_binary_pov(self, pov_filename, cb_path, enable_randomness=True, timeout=15):
         # Test the binary pov
 
         # sanity checks
@@ -96,7 +114,8 @@ class CGCPovTester(object):
             # file descriptor 3 is the negotiation server
             os.dup2(negotiation_pov.fileno(), 3)
 
-            os.execve(qemu_path, [qemu_path, pov_filename], os.environ)
+            seed = str(random.randint(0, 100000))
+            os.execve(qemu_path, [qemu_path, "-seed", seed, pov_filename], os.environ)
 
         # clean up the pipes in the host
         os.close(challenge_r)
@@ -113,10 +132,10 @@ class CGCPovTester(object):
 
         # negiotation is specific to type1 / type2
         result = self._do_binary_negotiation(negotiation_infra, directory,
-                                             challenge_bin_pid)
+                                             challenge_bin_pid, timeout)
 
         # wait for pov to terminate
-        os.waitpid(pov_pid, 0)
+        self._wait_pid_timeout(pov_pid, 0, timeout)
 
         # clean up test directory
         shutil.rmtree(directory)
@@ -124,13 +143,14 @@ class CGCPovTester(object):
         return result
 
     def _do_binary_negotiation(self, negotiation_pipe, directory,
-                               challenge_binary_pid):
+                               challenge_binary_pid, timeout):
         """
         Negotiate with a PoV binary
         :param negotiation_pipe: pipe to read negotiation materials from
         :param directory: directory core file will be found
         :param challenge_binary_pid: pid of the challenge binary, we will wait
         for it to exit
+        :param timeout: timeout for the binary
         :return: boolean describing whether the binary pov behaved correctly
         """
 
@@ -146,17 +166,17 @@ class CGCPovTester(object):
         if pov_type == 1:
             l.debug("entering type1 negotiation")
             return self._do_binary_negotiation_type_1(negotiation_pipe, directory,
-                                                      challenge_binary_pid)
+                                                      challenge_binary_pid, timeout)
         elif pov_type == 2:
             l.debug("entering type2 negotiation")
             return self._do_binary_negotiation_type_2(negotiation_pipe, directory,
-                                                      challenge_binary_pid)
+                                                      challenge_binary_pid, timeout)
         else:
             l.error("Invalid pov type: %d", pov_type)
             return False
 
     def _do_binary_negotiation_type_1(self, negotiation_pipe, directory,
-                                      challenge_binary_pid):
+                                      challenge_binary_pid, timeout):
         """
         Negotiate with a Type 1 PoV binary
         :param negotiation_pipe: pipe to read negotiation materials from
@@ -199,7 +219,7 @@ class CGCPovTester(object):
 
         l.debug("waiting on challenge binary...")
 
-        _, returncode = os.waitpid(challenge_binary_pid, 0)
+        _, returncode = self._wait_pid_timeout(challenge_binary_pid, 0, timeout)
 
         l.debug("... challenge binary terminated")
 
@@ -258,7 +278,7 @@ class CGCPovTester(object):
 
     @staticmethod
     def _do_binary_negotiation_type_2(negotiation_pipe, directory,
-                                      challenge_bin_pid):
+                                      challenge_bin_pid, timeout):
         """
         Negotiate with a Type 2 PoV binary
         :param negotiation_pipe: pipe to read negotiation materials from
@@ -290,6 +310,6 @@ class CGCPovTester(object):
         l.debug("pov successful? %s", succeeded)
 
         # wait for the challenge to exit
-        os.waitpid(challenge_bin_pid, 0)
+        CGCPovTester._wait_pid_timeout(challenge_bin_pid, 0, timeout)
 
         return succeeded
