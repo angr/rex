@@ -1,6 +1,7 @@
 import os
 import shutil
 import random
+import select
 import struct
 import socket
 import signal
@@ -26,6 +27,20 @@ class CGCPovTester(object):
         self.expected_register = expected_register
 
     @staticmethod
+    def _recv_timeout(sock, num_bytes, timeout=15):
+        r = ""
+        while len(r) < num_bytes:
+            rfd, _, _ = select.select([sock], [], [sock], timeout)
+            if sock in rfd:
+                n = sock.recv(num_bytes-len(r))
+                if len(n) == 0:
+                    return r
+                r += n
+            else:
+                return r
+        return r
+
+    @staticmethod
     def _wait_pid_timeout(pid, options, timeout):
         def kill_proc(p):
             os.kill(p, signal.SIGKILL)
@@ -41,7 +56,6 @@ class CGCPovTester(object):
 
     def test_binary_pov(self, pov_filename, cb_path, enable_randomness=True, timeout=15):
         # Test the binary pov
-
         # sanity checks
         if not os.path.isfile(pov_filename):
             raise ValueError("pov is does not exist")
@@ -82,16 +96,14 @@ class CGCPovTester(object):
                     )
 
             devnull = open('/dev/null', 'w')
-
             # close the other entry
             os.close(pov_w)
             os.close(challenge_r)
-
             os.dup2(pov_r, 0)  # read from pov as stdin
             os.dup2(challenge_w, 1)  # write to the pov
-            os.dup2(devnull.fileno(), 2)  # silence segfault message
-
+            os.dup2(devnull.fileno(), 2)  # silence segfault message)
             if enable_randomness:
+                random.seed()
                 seed = str(random.randint(0, 100000))
                 argv = [qemu_path, "-seed", seed, "-magicdump", "magic", cb_path]
             else:
@@ -103,7 +115,6 @@ class CGCPovTester(object):
         # fork off the pov binary
         pov_pid = os.fork()
         if pov_pid == 0:
-
             # close the other entry
             os.close(pov_r)
             os.close(challenge_w)
@@ -114,6 +125,7 @@ class CGCPovTester(object):
             # file descriptor 3 is the negotiation server
             os.dup2(negotiation_pov.fileno(), 3)
 
+            random.seed()
             seed = str(random.randint(0, 100000))
             os.execve(qemu_path, [qemu_path, "-seed", seed, pov_filename], os.environ)
 
@@ -186,9 +198,9 @@ class CGCPovTester(object):
         :return: boolean describing whether the binary pov behaved correctly
         """
 
-        ipmask = struct.unpack("<I", negotiation_pipe.recv(4))[0]
-        regmask = struct.unpack("<I", negotiation_pipe.recv(4))[0]
-        regnum = struct.unpack("<I", negotiation_pipe.recv(4))[0]
+        ipmask = struct.unpack("<I", self._recv_timeout(negotiation_pipe, 4))[0]
+        regmask = struct.unpack("<I", self._recv_timeout(negotiation_pipe, 4))[0]
+        regnum = struct.unpack("<I", self._recv_timeout(negotiation_pipe, 4))[0]
 
         l.debug("recieved a ipmask of %#x", ipmask)
         l.debug("recieved a regmask of %#x", regmask)
@@ -207,6 +219,7 @@ class CGCPovTester(object):
             l.error("received a ipmask with not enough bits set")
             return False
 
+        random.seed()
         reg_val = random.randint(0, 0xffffffff)
         ip_val = random.randint(0, 0xffffffff)
 
@@ -299,13 +312,16 @@ class CGCPovTester(object):
         negotiation_pipe.send(''.join(type2_vals_elems))
 
         # receive the leaked flag data
-        flag_data = negotiation_pipe.recv(read_size)
+        flag_data = CGCPovTester._recv_timeout(negotiation_pipe, read_size, timeout)
 
-        l.debug("received flag data %#x", struct.unpack("<I", flag_data)[0])
+        if len(flag_data) < 4:
+            l.debug("didnt receive enough bytes")
+        else:
+            l.debug("received flag data %#x", struct.unpack("<I", flag_data)[0])
 
         # check if it exists within the region
         magic_data = open(os.path.join(directory, 'magic')).read()
-        succeeded = flag_data in magic_data
+        succeeded = flag_data in magic_data and len(flag_data) == read_size
 
         l.debug("pov successful? %s", succeeded)
 
