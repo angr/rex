@@ -106,6 +106,25 @@ def test_shellcode_placement():
     # only executable regions should be that one heap page and the stack, despite having more heap control and global control
     nose.tools.assert_equal(sorted(exec_regions), sorted([0xb7ffb000, 0xbaaaaeec]))
 
+def test_boolector_solving():
+    '''
+    Test boolector's ability to generate the correct values at pov runtime.
+    '''
+
+    crash = "A" * 64 * 4
+    crash = rex.Crash(os.path.join(bin_location, "tests/i386/add_payload"), crash)
+
+    arsenal = crash.exploit()
+
+    nose.tools.assert_true(len(arsenal.register_setters) >= 3)
+    nose.tools.assert_true(len(arsenal.leakers) >= 2)
+
+    for reg_setter in arsenal.register_setters:
+        nose.tools.assert_true(_do_pov_test(reg_setter))
+
+    for leaker in arsenal.leakers:
+        nose.tools.assert_true(_do_pov_test(leaker))
+
 def test_cpp_vptr_smash():
     '''
     Test detection of 'arbitrary-read' vulnerability type, exploration of the crash, and exploitation post-exploration
