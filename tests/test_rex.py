@@ -117,7 +117,7 @@ def test_boolector_solving():
     arsenal = crash.exploit()
 
     nose.tools.assert_true(len(arsenal.register_setters) >= 3)
-    nose.tools.assert_true(len(arsenal.leakers) >= 2)
+    nose.tools.assert_true(len(arsenal.leakers) >= 1)
 
     for reg_setter in arsenal.register_setters:
         nose.tools.assert_true(_do_pov_test(reg_setter))
