@@ -634,6 +634,21 @@ class Type2CrashFuzzer(object):
                         break
             return None
 
+    def exploitable(self):
+        if self.output_leak_idx is not None:
+            return True
+        return False
+
+    def dumpable(self):
+        if self._raw_payload is not None:
+            return True
+        return False
+
+    def get_leaking_payload(self):
+        if self._raw_payload is None:
+            raise CannotExploit
+        return self._raw_payload
+
     def dump_c(self, filename=None):
         """
         Creates a simple C file to do the type1 exploit

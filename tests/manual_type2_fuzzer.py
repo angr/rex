@@ -1,9 +1,20 @@
 from rex import pov_fuzzing
 import os
+import colorguard
+import nose
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
 
 import logging
 logging.getLogger("rex").setLevel("DEBUG")
+
+def _do_pov_test(pov, enable_randomness=True):
+    """
+    Test a POV
+    """
+    for _ in range(10):
+        if pov.test_binary(enable_randomness=enable_randomness):
+            return True
+    return False
 
 crash = "%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%X%x%sAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 binary = os.path.join(bin_location, "tests/i386/controlled_printf")
@@ -12,12 +23,14 @@ pov_fuzzer = pov_fuzzing.Type2CrashFuzzer(binary, crash)
 
 assert any(pov_fuzzer.test_binary() for _ in range(10))
 
-#FIXME dump to colorguard too
+assert pov_fuzzer.exploitable()
 
-#cg = colorguard.ColorGuard(binary, flag_leak)
+assert pov_fuzzer.dumpable()
 
-#nose.tools.assert_true(cg.causes_leak())
+cg = colorguard.ColorGuard(binary, pov_fuzzer.get_leaking_payload())
 
-#pov = cg.attempt_pov()
+nose.tools.assert_true(cg.causes_leak())
 
-#nose.tools.assert_true(_do_pov_test(pov, enable_randomness=False))
+pov = cg.attempt_pov()
+
+nose.tools.assert_true(_do_pov_test(pov, enable_randomness=False))
