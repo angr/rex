@@ -3,19 +3,16 @@ import nose
 
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
-examples_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../rex/examples/'))
-
 
 def test_write_what_where_shadowstack():
     """
     Test that our write what where exploit can leak, and works in the presence of a shadowstack
     """
     crash_str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
-    crash = rex.Crash(os.path.join(examples_location, "write_what_where_shadow_stack"), crash_str)
+    crash = rex.Crash(os.path.join(bin_location + "/tests/i386/write_what_where_shadow_stack"), crash_str)
     arsenal = crash.exploit(blacklist_symbolic_explore=False)
     exploit = arsenal.best_type2
     nose.tools.assert_true(exploit.test_binary())
-
 
 def run_all():
     functions = globals()
