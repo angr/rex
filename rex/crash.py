@@ -97,35 +97,12 @@ class Crash(object):
         memory_writes = sorted(self.state.memory.mem.get_symbolic_addrs())
         l.debug("filtering writes")
         memory_writes = [m for m in memory_writes if m/0x1000 != 0x4347c]
-        memory_writes = [m for m in memory_writes if any("stdin" in v for v in self.state.memory.load(m, 1).variables)]
+        user_writes = [m for m in memory_writes if any("stdin" in v for v in self.state.memory.load(m, 1).variables)]
+        flag_writes = [m for m in memory_writes if any("cgc-flag-data" in v for v in self.state.memory.load(m, 1).variables)]
         l.debug("done filtering writes")
 
-        self.symbolic_mem = { }
-
-        memory_writes = sorted(memory_writes)
-
-        current_w_start = memory_writes[0]
-        current_w_end = current_w_start + 1
-
-        for write in memory_writes[1:]:
-            write_start = write
-            write_len = 1
-
-            # segment is completely seperate
-            if write_start > current_w_end:
-                # store the old segment
-                self.symbolic_mem[current_w_start] = current_w_end - current_w_start
-
-                # new segment, update start and end
-                current_w_start = write_start
-                current_w_end = write_start + write_len
-            else:
-                # update the end of the current segment, the segment `write` exists within current
-                current_w_end = max(current_w_end, write_start + write_len)
-
-
-        # write in the last segment
-        self.symbolic_mem[current_w_start] = current_w_end - current_w_start
+        self.symbolic_mem = self._segment(user_writes)
+        self.flag_mem = self._segment(flag_writes)
 
         # crash type
         self.crash_type = None
@@ -309,6 +286,39 @@ class Crash(object):
         return cp
 
 ### UTIL
+
+    @staticmethod
+    def _segment(memory_writes):
+        segments = { }
+        memory_writes = sorted(memory_writes)
+
+        if len(memory_writes) == 0:
+            return segments
+
+        current_w_start = memory_writes[0]
+        current_w_end = current_w_start + 1
+
+        for write in memory_writes[1:]:
+            write_start = write
+            write_len = 1
+
+            # segment is completely seperate
+            if write_start > current_w_end:
+                # store the old segment
+                segments[current_w_start] = current_w_end - current_w_start
+
+                # new segment, update start and end
+                current_w_start = write_start
+                current_w_end = write_start + write_len
+            else:
+                # update the end of the current segment, the segment `write` exists within current
+                current_w_end = max(current_w_end, write_start + write_len)
+
+
+        # write in the last segment
+        segments[current_w_start] = current_w_end - current_w_start
+
+        return segments
 
     def _symbolic_control(self, st):
         '''

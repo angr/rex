@@ -9,6 +9,7 @@ bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 
 import logging
 logging.getLogger("rex").setLevel("DEBUG")
+logging.getLogger("povsim").setLevel("DEBUG")
 
 def _do_pov_test(pov, enable_randomness=True):
     ''' Test a POV '''

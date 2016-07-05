@@ -18,6 +18,7 @@ setup(
       packages=['rex', 'rex.exploit', 'rex.exploit.cgc', 'rex.exploit.techniques', 'rex.exploit.shellcodes'],
       install_requires=[
             'angr',
+            'povsim',
             'simuvex',
             'tracer',
             'angrop',
