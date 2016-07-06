@@ -6,7 +6,7 @@ import operator
 import itertools
 from collections import defaultdict
 from multiprocessing import Pool
-from rex.pov_testing import CGCPovTester
+from povsim import CGCPovSimulator
 from angrop import rop_utils
 from ..crash import CannotExploit
 
@@ -691,7 +691,7 @@ class Type2CrashFuzzer(object):
         pov_binary_filename = tempfile.mktemp(dir='/tmp', prefix='rex-pov-')
         self.dump_binary(filename=pov_binary_filename)
 
-        pov_tester = CGCPovTester()
+        pov_tester = CGCPovSimulator()
         result = pov_tester.test_binary_pov(pov_binary_filename, self.binary, enable_randomness=enable_randomness,
                                             timeout=timeout)
         os.remove(pov_binary_filename)

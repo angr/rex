@@ -4,7 +4,7 @@ import tempfile
 import itertools
 from collections import defaultdict
 from multiprocessing import Pool
-from rex.pov_testing import CGCPovTester
+from povsim import CGCPovSimulator
 
 import angr
 import tracer
@@ -687,7 +687,7 @@ translate_byte_%#x(curr, orig);
         pov_binary_filename = tempfile.mktemp(dir='/tmp', prefix='rex-pov-')
         self.dump_binary(filename=pov_binary_filename)
 
-        pov_tester = CGCPovTester()
+        pov_tester = CGCPovSimulator()
         return pov_tester.test_binary_pov(pov_binary_filename, self.binary)
 
     @staticmethod
