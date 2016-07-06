@@ -9,10 +9,78 @@ import tracer
 import hashlib
 from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
-from simuvex import SimMemoryError, s_options as so
+from simuvex import SimMemoryError, s_options as so, SimStatePlugin
+import simuvex
+
 
 class NonCrashingInput(Exception):
     pass
+
+
+class ChallRespInfo(SimStatePlugin):
+    """
+    This state plugin keeps track of the reads and writes to symbolic addresses
+    """
+    def __init__(self):
+        SimStatePlugin.__init__(self)
+        # for each constraint we check what the max stdin it has and how much stdout we have
+        self.stdin_min_stdout_constraints = {}
+        self.stdin_min_stdout_reads = {}
+
+    def copy(self):
+        s = ChallRespInfo()
+        s.stdin_min_stdout_constraints = dict(self.stdin_min_stdout_constraints)
+        s.stdin_min_stdout_reads = dict(self.stdin_min_stdout_reads)
+        return s
+
+    @staticmethod
+    def get_byte(var_name):
+        idx = var_name.split("_")[3]
+        return int(idx, 16)
+
+    @staticmethod
+    def prep_state(state):
+        state.inspect.b(
+            'exit',
+            simuvex.BP_BEFORE,
+            action=ChallRespInfo.exit_hook
+        )
+        state.inspect.b(
+            'syscall',
+            simuvex.BP_AFTER,
+            action=ChallRespInfo.syscall_hook
+        )
+        state.register_plugin("chall_resp_info", ChallRespInfo())
+
+    @staticmethod
+    def exit_hook(state):
+        # detect challenge response for fun
+        guard = state.inspect.exit_guard
+        if any(v.startswith("cgc-flag") for v in guard.variables) and \
+                any(v.startswith("file_/dev/stdin") for v in guard.variables):
+            l.warning("Challenge response detected")
+
+        # track the amount of stdout we had when a constraint was first added to a byte of stdin
+        stdin_min_stdout_constraints = state.get_plugin("chall_resp_info").stdin_min_stdout_constraints
+        stdout_pos = state.se.any_int(state.posix.get_file(1).pos)
+        for v in guard.variables:
+            if v.startswith("file_/dev/stdin"):
+                byte_num = ChallRespInfo.get_byte(v)
+                if byte_num not in stdin_min_stdout_constraints:
+                    stdin_min_stdout_constraints[byte_num] = stdout_pos
+
+    @staticmethod
+    def syscall_hook(state):
+        # here we detect how much stdout we have when a byte is first read in
+        syscall_name = state.inspect.syscall_name
+        if syscall_name == "receive":
+            # track the amount of stdout we had when we first read the byte
+            stdin_min_stdout_reads = state.get_plugin("chall_resp_info").stdin_min_stdout_reads
+            stdout_pos = state.se.any_int(state.posix.get_file(1).pos)
+            stdin_pos = state.se.any_int(state.posix.get_file(0).pos)
+            for i in range(0, stdin_pos):
+                if i not in stdin_min_stdout_reads:
+                    stdin_min_stdout_reads[i] = stdout_pos
 
 class Crash(object):
     '''
@@ -69,6 +137,7 @@ class Crash(object):
                            so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES}
             self._tracer = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False,
                                          add_options=add_options, remove_options=remove_options)
+            ChallRespInfo.prep_state(self._tracer.path_group.one_active.state)
             prev, crash_state = self._tracer.run(constrained_addrs)
 
             if crash_state is None:
