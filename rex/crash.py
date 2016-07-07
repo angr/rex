@@ -417,7 +417,7 @@ class Crash(object):
         pc = r.reg_vals['eip']
         l.debug('crash occured at %#x', pc)
         l.debug("checking if ip is null")
-        if pc == 0:
+        if pc < 0x1000:
             return Vulnerability.NULL_DEREFERENCE
 
         l.debug("checking if ip register points to executable memory")
