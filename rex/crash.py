@@ -7,6 +7,7 @@ import angr
 import angrop
 import tracer
 import hashlib
+import operator
 from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
 from simuvex import SimMemoryError, s_options as so, SimStatePlugin
@@ -274,22 +275,42 @@ class Crash(object):
         return new_input
 
     def _explore_arbitrary_read(self, path_file=None):
-        # crash type was an arbitrary-read, let's point the violating address at a symbolic memory region
+        # crash type was an arbitrary-read, let's point the violating address at a
+        # symbolic memory region
 
-        # XXX: which symbolic region do we pick do we choose to point it to?
-        max_addr = None
-        for addr in self.symbolic_mem.keys():
-            region_sz = self.symbolic_mem[addr]
-            if max_addr is None or region_sz >= self.symbolic_mem[max_addr]:
-                max_addr = addr
+        largest_regions = sorted(self.symbolic_mem.items(),
+                key=operator.itemgetter(1),
+                reverse=True)
 
-        # TODO: if max_addr cannot be set, we need to find another address to set it to
-        if max_addr is None:
-            l.debug("unable to find a symbolic memory region to set violating address to, setting to non-writable region")
-            max_addr = self.project.loader.min_addr()
+        min_read = self.state.se.min(self.violating_action.addr)
+        max_read = self.state.se.max(self.violating_action.addr)
 
-        read_addr = max_addr
-        self.state.add_constraints(self.violating_action.addr == read_addr)
+        largest_regions = map(operator.itemgetter(0), largest_regions)
+        # filter addresses which fit between the min and max possible address
+        largest_regions = filter(lambda x: (min_read <= x) and (x <= max_read), largest_regions)
+
+        # populate the rest of the list with addresses from the binary
+        min_addr = self.project.loader.main_bin.get_min_addr()
+        max_addr = self.project.loader.main_bin.get_max_addr()
+        pages = range(min_addr, max_addr, 0x1000)
+        pages = filter(lambda x: (min_read <= x) and (x <= max_read), pages)
+
+        read_addr = None
+        constraint = None
+        for addr in largest_regions + pages:
+            read_addr = addr
+            constraint = self.violating_action.addr == addr
+
+            if self.state.se.satisfiable(extra_constraints=(constraint,)):
+                break
+
+            constraint = None
+
+        if constraint is None:
+            raise CannotExploit("unable to find suitable read address, cannot explore")
+
+        self.state.add_constraints(constraint)
+
         l.debug("constraining input to read from address %#x", read_addr)
 
         l.info("starting a new crash exploration phase based off the crash at address 0x%x", self.violating_action.ins_addr)
@@ -304,8 +325,9 @@ class Crash(object):
         self.__init__(self.binary, new_input, constrained_addrs=self.constrained_addrs + [self.violating_action])
 
     def _explore_arbitrary_write(self, path_file=None):
-        # crash type was an arbitrary-write, this routine doesn't care about taking advantage of the write
-        # it just wants to try to find a more valuable crash by pointing the write at some writable memory
+        # crash type was an arbitrary-write, this routine doesn't care about taking advantage
+        # of the write it just wants to try to find a more valuable crash by pointing the write
+        # at some writable memory
 
         # find a writable data segment
 
@@ -313,22 +335,35 @@ class Crash(object):
 
         assert len(elf_objects) > 0, "target binary is not ELF or CGC, unsupported by rex"
 
-        chosen_segment = None
+        min_write = self.state.se.min(self.violating_action.addr)
+        max_write = self.state.se.max(self.violating_action.addr)
+
+        segs = [ ]
         for eobj in elf_objects:
-            for segment in eobj.segments:
-                if segment.is_writable:
-                    chosen_segment = segment
+            segs.extend(filter(lambda s: s.is_writable, eobj.segments))
+
+        segs = filter(lambda s: (s.min_addr <= max_write) and (s.max_addr >= min_write), segs)
+
+        write_addr = None
+        constraint = None
+        for seg in segs:
+            for page in range(seg.min_addr, seg.max_addr, 0x1000):
+                write_addr = page
+                constraint = self.violating_action.addr == page
+
+                if self.state.se.satisfiable(extra_constraints=(constraint,)):
                     break
-            if chosen_segment is not None:
-                break
 
-        assert chosen_segment is not None, "unable to find a writable segment, TODO: look through dynamically allocd mem"
+                constraint = None
 
-        write_addr = chosen_segment.min_addr
-        self.state.add_constraints(self.violating_action.addr == write_addr)
+        if constraint is None:
+            raise CannotExploit("Cannot point write at any writeable segments")
+
+        self.state.add_constraints(constraint)
         l.debug("constraining input to write to address %#x", write_addr)
 
-        l.info("starting a new crash exploration phase based off the crash at address %#x", self.violating_action.ins_addr)
+        l.info("starting a new crash exploration phase based off the crash at address %#x",
+                self.violating_action.ins_addr)
 
         new_input = self.state.posix.dumps(0)
         if path_file is not None:
@@ -336,7 +371,8 @@ class Crash(object):
             with open(path_file, 'w') as f:
                 f.write(new_input)
 
-        self.__init__(self.binary, new_input, constrained_addrs=self.constrained_addrs + [self.violating_action])
+        self.__init__(self.binary, new_input,
+                constrained_addrs=self.constrained_addrs + [self.violating_action])
 
     def copy(self):
         cp = Crash.__new__(Crash)
