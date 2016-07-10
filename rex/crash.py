@@ -8,7 +8,7 @@ import angrop
 import tracer
 import hashlib
 import operator
-from .trace_additions import ChallRespInfo, FormatInfoIntToStr, FormatInfoStrToInt
+from .trace_additions import ChallRespInfo
 from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
 from simuvex import SimMemoryError, s_options as so
@@ -33,7 +33,7 @@ class Crash(object):
         :param constrained_addrs: list of addrs which have been constrained during exploration
         :param crash_state: an already traced crash state
         :param prev_path: path leading up to the crashing block
-        :param format_infos: a list of FormatInfo objects that should be used when analyzing the crash
+        :param format_infos: a list of atoi FormatInfo objects that should be used when analyzing the crash
         '''
 
         self.binary = binary

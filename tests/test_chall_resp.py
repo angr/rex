@@ -16,8 +16,6 @@ def _do_pov_test(pov, enable_randomness=True):
 
 
 def test_chall_resp_atoi():
-    import tracer
-    tracer.tracer.l.setLevel("DEBUG")
     crash_input = '1636418350\n1588167992\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' \
                   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' \
                   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' \
@@ -32,8 +30,6 @@ def test_chall_resp_atoi():
     f2 = FormatInfoStrToInt(addr=atoi_addr, func_name="atoi", str_arg_num=0, base=10, base_arg=None)
     crash = rex.Crash(bin_path, crash=crash_input, format_infos=[f1, f2])
     exploit_f = crash.exploit()
-    # FIXME actually handle variable length stuff
-    import ipdb; ipdb.set_trace()
     for e in exploit_f.register_setters:
         nose.tools.assert_true(_do_pov_test(e))
     for e in exploit_f.leakers:
