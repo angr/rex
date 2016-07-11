@@ -10,7 +10,7 @@ bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 def _do_pov_test(pov, enable_randomness=True):
     """ Test a POV """
     for _ in range(10):
-        if pov.test_binary(enable_randomness=enable_randomness):
+        if pov.test_binary(enable_randomness=enable_randomness, timeout=25):
             return True
     return False
 
