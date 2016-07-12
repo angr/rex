@@ -449,7 +449,7 @@ class Crash(object):
         Quickly triage a crash with just QEMU. Less accurate, but much faster.
         :param binary: path to binary which crashed
         :param crash: input which caused crash
-        :return: a vulnerability classification, or None if crash could not be classified
+        :return: a vulnerability classification and the value of eip where the crash occured
         """
 
         l.debug("quick triaging crash against '%s'", binary)
@@ -468,7 +468,7 @@ class Crash(object):
         l.debug('crash occured at %#x', pc)
         l.debug("checking if ip is null")
         if pc < 0x1000:
-            return Vulnerability.NULL_DEREFERENCE
+            return pc, Vulnerability.NULL_DEREFERENCE
 
         l.debug("checking if ip register points to executable memory")
         # was ip mapped?
@@ -479,7 +479,7 @@ class Crash(object):
             l.debug("ip points to mapped memory")
             if not perms.symbolic and not ((perms & 4) == 4).args[0]:
                 l.debug("ip appears to be uncontrolled")
-                return Vulnerability.UNCONTROLLED_IP_OVERWRITE
+                return pc, Vulnerability.UNCONTROLLED_IP_OVERWRITE
 
         except SimMemoryError:
             ip_overwritten = True
@@ -493,11 +493,11 @@ class Crash(object):
             while base < cgc_object.get_max_addr():
                 if pc & 0xff000000 == base:
                     l.debug("ip appears to only be partially controlled")
-                    return Vulnerability.PARTIAL_IP_OVERWRITE
+                    return pc, Vulnerability.PARTIAL_IP_OVERWRITE
                 base += 0x01000000
 
             l.debug("ip appears to be completely controlled")
-            return Vulnerability.IP_OVERWRITE
+            return pc, Vulnerability.IP_OVERWRITE
 
         l.debug("checking if a read or write caused the crash")
         # wasn't an ip overwrite, check reads and writes
@@ -523,7 +523,7 @@ class Crash(object):
                 target_addr = start_state.se.any_int(a.addr)
                 if target_addr < 0x1000:
                     l.debug("attempt to write or read to address of NULL")
-                    return Vulnerability.NULL_DEREFERENCE
+                    return pc, Vulnerability.NULL_DEREFERENCE
 
                 # we will take the last memory action, so things like an `add` instruction
                 # are triaged as a 'write' opposed to a 'read'
@@ -534,13 +534,13 @@ class Crash(object):
                     # it's most likely uncontrolled
                     if target_addr & 0xfff00000 == 0:
                         l.debug("write attempt at a suspiciously small address, assuming uncontrolled")
-                        return Vulnerability.UNCONTROLLED_WRITE
+                        return pc, Vulnerability.UNCONTROLLED_WRITE
 
                     try:
                         perms = r.memory.permissions(target_addr)
                         if not perms.symbolic and not ((perms & 2) == 2).args[0]:
                             l.debug("write attempt at a read-only page, assuming uncontrolled")
-                            return Vulnerability.UNCONTROLLED_WRITE
+                            return pc, Vulnerability.UNCONTROLLED_WRITE
 
                     except SimMemoryError:
                         pass
@@ -557,4 +557,4 @@ class Crash(object):
             posit = 'unknown'
 
         # returning 'unknown' if crash does not fall into one of our obvious categories
-        return posit
+        return pc, posit
