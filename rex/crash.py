@@ -24,7 +24,7 @@ class Crash(object):
     '''
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
-                 prev_path=None, format_infos=None):
+                 prev_path=None, hooks=None, format_infos=None):
         '''
         :param binary: path to the binary which crashed
         :param crash: string of input which crashed the binary
@@ -33,6 +33,7 @@ class Crash(object):
         :param constrained_addrs: list of addrs which have been constrained during exploration
         :param crash_state: an already traced crash state
         :param prev_path: path leading up to the crashing block
+        :param hooks: dictionary of simprocedure hooks, addresses to simprocedures
         :param format_infos: a list of atoi FormatInfo objects that should be used when analyzing the crash
         '''
 
@@ -40,6 +41,7 @@ class Crash(object):
         self.crash  = crash
         self.pov_file = pov_file
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
+        self.hooks = hooks
 
         self.project = angr.Project(binary)
 
@@ -73,7 +75,7 @@ class Crash(object):
             add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
                            so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES}
             self._tracer = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False,
-                                         add_options=add_options, remove_options=remove_options)
+                                         hooks=self.hooks, add_options=add_options, remove_options=remove_options)
             ChallRespInfo.prep_tracer(self._tracer, format_infos)
             prev, crash_state = self._tracer.run(constrained_addrs)
 
