@@ -8,7 +8,7 @@ import angrop
 import tracer
 import hashlib
 import operator
-from .trace_additions import ChallRespInfo
+from .trace_additions import ChallRespInfo, ZenPlugin
 from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
 from simuvex import SimMemoryError, s_options as so
@@ -87,6 +87,7 @@ class Crash(object):
             self._tracer = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False,
                                          hooks=self.hooks, add_options=add_options, remove_options=remove_options)
             ChallRespInfo.prep_tracer(self._tracer, format_infos)
+            ZenPlugin.prep_tracer(self._tracer)
             prev, crash_state = self._tracer.run(constrained_addrs)
 
             if crash_state is None:
@@ -116,7 +117,7 @@ class Crash(object):
         l.debug("filtering writes")
         memory_writes = [m for m in memory_writes if m/0x1000 != 0x4347c]
         user_writes = [m for m in memory_writes if any("stdin" in v for v in self.state.memory.load(m, 1).variables)]
-        flag_writes = [m for m in memory_writes if any("cgc-flag-data" in v for v in self.state.memory.load(m, 1).variables)]
+        flag_writes = [m for m in memory_writes if any(v.startswith("cgc-flag") for v in self.state.memory.load(m, 1).variables)]
         l.debug("done filtering writes")
 
         self.symbolic_mem = self._segment(user_writes)
