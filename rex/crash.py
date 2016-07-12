@@ -74,6 +74,13 @@ class Crash(object):
                               so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS}
             add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
                            so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES}
+
+            # faster place to check for non-crashing inputs
+            if not tracer.Runner(binary, input=self.crash).crash_mode:
+
+                l.warning("input did not cause a crash")
+                raise NonCrashingInput
+
             self._tracer = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False,
                                          hooks=self.hooks, add_options=add_options, remove_options=remove_options)
             ChallRespInfo.prep_tracer(self._tracer, format_infos)
