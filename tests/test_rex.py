@@ -219,7 +219,7 @@ def test_quick_triage():
         binary_path = os.path.join(bin_location, tup[1])
         expected_tp = tup[2]
 
-        nose.tools.assert_true(rex.Crash.quick_triage(binary_path, crash_input) == expected_tp)
+        nose.tools.assert_true(rex.Crash.quick_triage(binary_path, crash_input)[1] == expected_tp)
 
 def run_all():
     functions = globals()
