@@ -1,5 +1,6 @@
 from simuvex import SimStatePlugin
 import simuvex
+import claripy
 
 import string
 import logging
@@ -133,7 +134,7 @@ def end_info_hook(state):
     # also add a constraint that points out what the input is
     if pending_info.get_type() == "StrToInt":
         # result constraint
-        result = state.se.any_int(state.regs.eax)
+        result = state.se.BVV(state.se.any_str(state.regs.eax))
         new_var = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_result", 32)
         constraint = new_var == result
         chall_resp_plugin.replacement_pairs.append((new_var, state.regs.eax))
@@ -146,9 +147,9 @@ def end_info_hook(state):
         chall_resp_plugin.replacement_pairs.append((input_bvs, input_val))
     else:
         # result constraint
-        result = state.se.any_str(state.mem[pending_info.str_dst_addr].string.resolved)
+        result = state.se.BVV(state.se.any_str(state.mem[pending_info.str_dst_addr].string.resolved))
         new_var = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_result",
-                               len(result) * 8)
+                               result.size())
         chall_resp_plugin.replacement_pairs.append((new_var, state.mem[pending_info.str_dst_addr].string.resolved))
         state.memory.store(pending_info.str_dst_addr, new_var)
         constraint = new_var == result
@@ -164,7 +165,7 @@ def end_info_hook(state):
     chall_resp_plugin.vars_we_added.update(new_var.variables)
     chall_resp_plugin.vars_we_added.update(input_bvs.variables)
     state.add_constraints(input_val == input_bvs)
-    state.add_constraints(constraint)
+    state.se._solver.add_replacement(new_var, result, invalidate_cache=False)
     chall_resp_plugin.tracer.preconstraints.append(constraint)
     chall_resp_plugin.tracer.variable_map[list(new_var.variables)[0]] = constraint
 
@@ -330,3 +331,163 @@ class ChallRespInfo(SimStatePlugin):
 
         for addr in chall_resp_plugin.format_infos:
             path._project.hook(addr, generic_info_hook, length=0)
+
+
+# THE ZEN HOOK
+
+def zen_hook(state, expr):
+    # don't do this if inside a hooked function
+    if state.has_plugin("chall_resp_info") and state.get_plugin("chall_resp_info").pending_info is not None:
+        return
+
+    if expr.op not in claripy.operations.leaf_operations and expr.op != "Concat":
+        # if there is more than one symbolic argument we replace it and preconstrain it
+        flag_args = ZenPlugin.get_flag_args(expr)
+        if len(flag_args) > 1:
+            zen_plugin = state.get_plugin("zen_plugin")
+
+            if expr.cache_key in zen_plugin.replacements:
+                # we already have the replacement
+                replacement = zen_plugin.replacements[expr.cache_key]
+            else:
+                # we need to make a new replacement
+                replacement = claripy.BVS("cgc-flag-zen", expr.size())
+
+                # if the depth is less than the max add the constraint and get which bytes it contains
+                depth = zen_plugin.get_expr_depth(expr)
+                if depth < zen_plugin.max_depth:
+                    con = replacement == expr
+                    state.add_constraints(con)
+                    contained_bytes = zen_plugin.get_flag_bytes(expr)
+                    zen_plugin.byte_dict[list(replacement.variables)[0]] = contained_bytes
+                    zen_plugin.zen_constraints.append(con)
+                else:
+                    # otherwise don't add the constraint, just replace
+                    depth = 0
+                    zen_plugin.byte_dict[list(replacement.variables)[0]] = set()
+
+                # save and replace
+                var = list(replacement.variables)[0]
+                zen_plugin.depths[var] = depth
+                concrete_val = state.se.any_int(expr)
+                constraint = replacement == concrete_val
+                state.se._solver.add_replacement(replacement, concrete_val, invalidate_cache=False)
+                zen_plugin.tracer.preconstraints.append(constraint)
+
+                zen_plugin.replacements[expr.cache_key] = replacement
+            return replacement
+
+
+def zen_memory_write(state):
+    mem_write_expr = state.inspect.mem_write_expr
+    new_expr = zen_hook(state, mem_write_expr)
+    if new_expr is not None:
+        state.inspect.mem_write_expr = new_expr
+
+
+def zen_register_write(state):
+    reg_write_expr = state.inspect.reg_write_expr
+    new_expr = zen_hook(state, reg_write_expr)
+    if new_expr is not None:
+        state.inspect.reg_write_expr = new_expr
+
+
+class ZenPlugin(SimStatePlugin):
+    def __init__(self, max_depth=10):
+        SimStatePlugin.__init__(self)
+        # dict from cache key to asts
+        self.replacements = dict()
+        # dict from zen vars to the depth
+        self.depths = dict()
+        # dict from zen vars to the bytes contained
+        self.byte_dict = dict()
+        # the tracer object (need to add replacements here)
+        self.tracer = None
+        # the max depth an object can have before it is replaced with a zen object with no constraint
+        self.max_depth = max_depth
+        # the zen replacement constraints (the ones that don't preconstrain input)
+        # ie (flagA + flagB == zen1234)
+        self.zen_constraints = []
+
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        del d["tracer"]
+        del d["state"]
+
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        self.tracer = None
+        self.state = None
+
+    @staticmethod
+    def get_flag_args(expr):
+        symbolic_args = tuple(a for a in expr.args if isinstance(a, claripy.ast.Base) and a.symbolic)
+        flag_args = []
+        for a in symbolic_args:
+            if any(v.startswith("cgc-flag") for v in a.variables):
+                flag_args.append(a)
+        return flag_args
+
+    def get_expr_depth(self, expr):
+        flag_args = self.get_flag_args(expr)
+        flag_arg_vars = set.union(*[set(v.variables) for v in flag_args])
+        depth = max(self.depths.get(v, 0) for v in flag_arg_vars) + 1
+        return depth
+
+    def copy(self):
+        z = ZenPlugin()
+        # we explicitly don't copy the dict since it only is a mapping from var to replacement
+        z.replacements = self.replacements
+        # we explicitly don't copy the dict since it only is a mapping form var to depth
+        z.depths = self.depths
+        # explicitly don't copy
+        z.byte_dict = self.byte_dict
+        z.tracer = self.tracer
+        z.max_depth = self.max_depth
+        z.zen_constraints = self.zen_constraints
+        return z
+
+    def get_flag_bytes(self, ast):
+        flag_args = self.get_flag_args(ast)
+        flag_arg_vars = set.union(*[set(v.variables) for v in flag_args])
+        contained_bytes = set()
+        for v in flag_arg_vars:
+            contained_bytes.update(self.byte_dict[v])
+        return contained_bytes
+
+    def filter_constraints(self, constraints):
+        zen_cache_keys = set(x.cache_key for x in self.zen_constraints)
+        new_cons = [ ]
+        for con in constraints:
+            if con.cache_key in zen_cache_keys or not all(v.startswith("cgc-flag") for v in con.variables):
+                new_cons.append(con)
+        return new_cons
+
+    @staticmethod
+    def prep_tracer(tracer):
+        state = tracer.path_group.one_active.state
+        if state.has_plugin("zen_plugin"):
+            zen_plugin = state.get_plugin("zen_plugin")
+        else:
+            zen_plugin = ZenPlugin()
+        zen_plugin.tracer = tracer
+
+        state.register_plugin("zen_plugin", zen_plugin)
+        state.inspect.b(
+            'reg_write',
+            simuvex.BP_BEFORE,
+            action=zen_register_write
+        )
+        state.inspect.b(
+            'mem_write',
+            simuvex.BP_BEFORE,
+            action=zen_memory_write
+        )
+
+        # setup the byte dict
+        byte_dict = zen_plugin.byte_dict
+        for i, b in enumerate(tracer.cgc_flag_bytes):
+            var = list(b.variables)[0]
+            byte_dict[var] = {i}
