@@ -76,10 +76,13 @@ class Crash(object):
                            so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES}
 
             # faster place to check for non-crashing inputs
-            if not tracer.Runner(binary, input=self.crash).crash_mode:
 
-                l.warning("input did not cause a crash")
-                raise NonCrashingInput
+            # optimized crash check
+            if self.project.loader.main_bin.os == 'cgc':
+
+                if not tracer.Runner(binary, input=self.crash).crash_mode:
+                    l.warning("input did not cause a crash")
+                    raise NonCrashingInput
 
             self._tracer = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False,
                                          hooks=self.hooks, add_options=add_options, remove_options=remove_options)
