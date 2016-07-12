@@ -13,7 +13,10 @@ logging.getLogger("povsim").setLevel("INFO")
 
 def _do_pov_test(pov, enable_randomness=True):
     ''' Test a POV '''
-    return any(pov.test_binary(enable_randomness=enable_randomness, times=10))
+    for i in range(10):
+        if pov.test_binary(enable_randomness=enable_randomness):
+            return True
+    return False
 
 def test_legit_00001():
     '''
