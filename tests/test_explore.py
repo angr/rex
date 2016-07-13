@@ -10,7 +10,7 @@ def test_write_what_where_shadowstack():
     """
     crash_str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
     crash = rex.Crash(os.path.join(bin_location + "/tests/i386/write_what_where_shadow_stack"), crash_str)
-    arsenal = crash.exploit(blacklist_symbolic_explore=False)
+    arsenal = crash.exploit()
     exploit = arsenal.best_type2
     nose.tools.assert_true(exploit.test_binary())
 
