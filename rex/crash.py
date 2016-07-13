@@ -24,7 +24,7 @@ class Crash(object):
     '''
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
-                 prev_path=None, hooks=None, format_infos=None):
+                 prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True):
         '''
         :param binary: path to the binary which crashed
         :param crash: string of input which crashed the binary
@@ -35,6 +35,8 @@ class Crash(object):
         :param prev_path: path leading up to the crashing block
         :param hooks: dictionary of simprocedure hooks, addresses to simprocedures
         :param format_infos: a list of atoi FormatInfo objects that should be used when analyzing the crash
+        :param rop_cache_tuple: a angrop tuple to load from
+        :param use_rop: whether or not to use rop
         '''
 
         self.binary = binary
@@ -49,13 +51,20 @@ class Crash(object):
         # hash binary contents for rop cache name
         binhash = hashlib.md5(open(self.binary).read()).hexdigest()
         rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
-        self.rop = self.project.analyses.ROP()
-        if os.path.exists(rop_cache_path):
-            l.info("loading rop gadgets from cache '%s'", rop_cache_path)
-            self.rop.load_gadgets(rop_cache_path)
+
+        if use_rop:
+            self.rop = self.project.analyses.ROP()
+            if rop_cache_tuple is not None:
+                l.info("loading rop gadgets from cache tuple")
+                self.rop._load_cache_tuple(rop_cache_tuple)
+            elif os.path.exists(rop_cache_path):
+                l.info("loading rop gadgets from cache '%s'", rop_cache_path)
+                self.rop.load_gadgets(rop_cache_path)
+            else:
+                self.rop.find_gadgets()
+                self.rop.save_gadgets(rop_cache_path)
         else:
-            self.rop.find_gadgets()
-            self.rop.save_gadgets(rop_cache_path)
+            self.rop = None
 
         self.os = self.project.loader.main_bin.os
 
