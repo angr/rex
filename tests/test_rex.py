@@ -203,6 +203,27 @@ def test_cgc_type1_rop_stacksmash():
     for leaker in arsenal.leakers:
         nose.tools.assert_true(_do_pov_test(leaker))
 
+
+def test_exploit_yielding():
+    '''
+    Test the yielding of exploits
+    '''
+
+    crash = "0500ffff80ffffff80f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1ffff80f1f1f1ebf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f100de7fff80ffffff800fffffff7ef3ffffffff7fffff80fffffeff09fefefefefe0a57656c63fe6d6520746f2850616c696e64726f6d65204669776465720a0affffffff80ffffe8800fffffff7f230a"
+
+    crash = rex.Crash(os.path.join(bin_location, "cgc_scored_event_1/cgc/0b32aa01_01"), crash.decode('hex'))
+
+    leakers = 0
+    register_setters = 0
+    for exploit in crash.yield_exploits():
+        leakers += 1 if exploit.cgc_type == 2 else 0
+        register_setters += 1 if exploit.cgc_type == 1 else 0
+        nose.tools.assert_true(_do_pov_test(exploit))
+
+    # make sure we can generate a few different exploits
+    nose.tools.assert_true(register_setters >= 3)
+    nose.tools.assert_true(leakers >= 2)
+
 def test_quick_triage():
     '''
     Test our ability to triage crashes quickly.

@@ -152,11 +152,7 @@ class Crash(object):
 
         return self.crash_type in [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
 
-    def exploit(self, blacklist_symbolic_explore=True, **kwargs):
-        '''
-        craft an exploit for a crash
-        '''
-
+    def _prepare_exploit_factory(self, blacklist_symbolic_explore=True, **kwargs):
         # crash should have been classified at this point
         if not self.exploitable():
             raise CannotExploit("non-exploitable crash")
@@ -172,8 +168,27 @@ class Crash(object):
         else:
             exploit = ExploitFactory(self, **kwargs)
 
-        exploit.initialize()
         return exploit
+
+    def exploit(self, blacklist_symbolic_explore=True, **kwargs):
+        '''
+        craft an exploit for a crash
+        '''
+
+        factory = self._prepare_exploit_factory(blacklist_symbolic_explore, **kwargs)
+
+        factory.initialize()
+        return factory
+
+    def yield_exploits(self, blacklist_symbolic_explore=True, **kwargs):
+        '''
+        craft an exploit for a crash
+        '''
+
+        factory = self._prepare_exploit_factory(blacklist_symbolic_explore, **kwargs)
+
+        for exploit in factory.yield_exploits():
+            yield exploit
 
     def explore(self, path_file=None):
         '''
