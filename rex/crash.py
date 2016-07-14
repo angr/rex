@@ -370,6 +370,9 @@ class Crash(object):
         cp.symbolic_mem = self.symbolic_mem.copy()
         cp.crash_type = self.crash_type
         cp._tracer = self._tracer
+        cp.violating_action = self.violating_action
+        cp.explore_steps = self.explore_steps
+        cp.constrained_addrs = list(self.constrained_addrs)
 
         return cp
 
