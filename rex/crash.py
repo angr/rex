@@ -24,7 +24,7 @@ class Crash(object):
     '''
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
-                 prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True):
+                 prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, explore_steps=0):
         '''
         :param binary: path to the binary which crashed
         :param crash: string of input which crashed the binary
@@ -37,6 +37,7 @@ class Crash(object):
         :param format_infos: a list of atoi FormatInfo objects that should be used when analyzing the crash
         :param rop_cache_tuple: a angrop tuple to load from
         :param use_rop: whether or not to use rop
+        :param explore_steps: number of steps which have already been explored, should only set by exploration methods
         '''
 
         self.binary = binary
@@ -44,6 +45,10 @@ class Crash(object):
         self.pov_file = pov_file
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.hooks = hooks
+        self.explore_steps = explore_steps
+
+        if self.explore_steps > 10:
+            raise CannotExploit("Too many steps taken during crash exploration")
 
         self.project = angr.Project(binary)
 
@@ -295,7 +300,10 @@ class Crash(object):
                 f.write(new_input)
 
         # create a new crash object starting here
-        self.__init__(self.binary, new_input, constrained_addrs=self.constrained_addrs + [self.violating_action])
+        self.__init__(self.binary,
+                new_input,
+                explore_steps=self.explore_steps + 1,
+                constrained_addrs=self.constrained_addrs + [self.violating_action])
 
     def _explore_arbitrary_write(self, path_file=None):
         # crash type was an arbitrary-write, this routine doesn't care about taking advantage
@@ -344,7 +352,9 @@ class Crash(object):
             with open(path_file, 'w') as f:
                 f.write(new_input)
 
-        self.__init__(self.binary, new_input,
+        self.__init__(self.binary,
+                new_input,
+                explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action])
 
     def copy(self):
