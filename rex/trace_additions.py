@@ -348,10 +348,14 @@ def zen_hook(state, expr):
 
             if expr.cache_key in zen_plugin.replacements:
                 # we already have the replacement
+                concrete_val = state.se.any_int(expr)
                 replacement = zen_plugin.replacements[expr.cache_key]
+                state.se._solver.add_replacement(replacement, concrete_val, invalidate_cache=False)
             else:
                 # we need to make a new replacement
                 replacement = claripy.BVS("cgc-flag-zen", expr.size())
+                concrete_val = state.se.any_int(expr)
+                state.se._solver.add_replacement(replacement, concrete_val, invalidate_cache=False)
 
                 # if the depth is less than the max add the constraint and get which bytes it contains
                 depth = zen_plugin.get_expr_depth(expr)
@@ -369,12 +373,11 @@ def zen_hook(state, expr):
                 # save and replace
                 var = list(replacement.variables)[0]
                 zen_plugin.depths[var] = depth
-                concrete_val = state.se.any_int(expr)
                 constraint = replacement == concrete_val
-                state.se._solver.add_replacement(replacement, concrete_val, invalidate_cache=False)
                 zen_plugin.tracer.preconstraints.append(constraint)
 
                 zen_plugin.replacements[expr.cache_key] = replacement
+
             return replacement
 
 
