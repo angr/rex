@@ -24,7 +24,8 @@ class Crash(object):
     '''
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
-                 prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, explore_steps=0):
+                 prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True,
+                 explore_steps=0, angrop_object=None):
         '''
         :param binary: path to the binary which crashed
         :param crash: string of input which crashed the binary
@@ -38,6 +39,7 @@ class Crash(object):
         :param rop_cache_tuple: a angrop tuple to load from
         :param use_rop: whether or not to use rop
         :param explore_steps: number of steps which have already been explored, should only set by exploration methods
+        :param angrop_object: an angrop object, should only be set by exploration methods
         '''
 
         self.binary = binary
@@ -58,16 +60,19 @@ class Crash(object):
         rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
 
         if use_rop:
-            self.rop = self.project.analyses.ROP()
-            if rop_cache_tuple is not None:
-                l.info("loading rop gadgets from cache tuple")
-                self.rop._load_cache_tuple(rop_cache_tuple)
-            elif os.path.exists(rop_cache_path):
-                l.info("loading rop gadgets from cache '%s'", rop_cache_path)
-                self.rop.load_gadgets(rop_cache_path)
+            if angrop_object is not None:
+                self.rop = angrop_object
             else:
-                self.rop.find_gadgets()
-                self.rop.save_gadgets(rop_cache_path)
+                self.rop = self.project.analyses.ROP()
+                if rop_cache_tuple is not None:
+                    l.info("loading rop gadgets from cache tuple")
+                    self.rop._load_cache_tuple(rop_cache_tuple)
+                elif os.path.exists(rop_cache_path):
+                    l.info("loading rop gadgets from cache '%s'", rop_cache_path)
+                    self.rop.load_gadgets(rop_cache_path)
+                else:
+                    self.rop.find_gadgets()
+                    self.rop.save_gadgets(rop_cache_path)
         else:
             self.rop = None
 
@@ -300,10 +305,13 @@ class Crash(object):
                 f.write(new_input)
 
         # create a new crash object starting here
+        use_rop = False if self.rop is None else True
         self.__init__(self.binary,
                 new_input,
                 explore_steps=self.explore_steps + 1,
-                constrained_addrs=self.constrained_addrs + [self.violating_action])
+                constrained_addrs=self.constrained_addrs + [self.violating_action],
+                use_rop=use_rop,
+                angrop_object=self.rop)
 
     def _explore_arbitrary_write(self, path_file=None):
         # crash type was an arbitrary-write, this routine doesn't care about taking advantage
@@ -352,10 +360,13 @@ class Crash(object):
             with open(path_file, 'w') as f:
                 f.write(new_input)
 
+        use_rop = False if self.rop is None else True
         self.__init__(self.binary,
                 new_input,
                 explore_steps=self.explore_steps + 1,
-                constrained_addrs=self.constrained_addrs + [self.violating_action])
+                constrained_addrs=self.constrained_addrs + [self.violating_action],
+                use_rop=use_rop,
+                angrop_object=self.rop)
 
     def copy(self):
         cp = Crash.__new__(Crash)
@@ -366,6 +377,7 @@ class Crash(object):
         cp.aslr = self.aslr
         cp.prev = self.prev.copy()
         cp.state = self.state.copy()
+        cp.rop = self.rop
         cp.added_actions = list(self.added_actions)
         cp.symbolic_mem = self.symbolic_mem.copy()
         cp.crash_type = self.crash_type
