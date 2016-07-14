@@ -19,6 +19,7 @@ import fuzzing_type_2_c_template
 
 l = logging.getLogger("rex.fuzzing_type_1")
 logging.getLogger("cle.elfcore").setLevel("CRITICAL")
+logging.getLogger("tracer.Runner").setLevel("WARNING")
 l.setLevel("DEBUG")
 
 
