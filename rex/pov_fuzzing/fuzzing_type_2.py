@@ -582,7 +582,7 @@ class Type2CrashFuzzer(object):
                             curr_best_matches.append(bits)
 
             # verify it can be pointed at flag page
-            all_bits = reduce(operator.__or__, [~(x ^ flag_bits) & 0xfffff for x in curr_best_matches])
+            all_bits = reduce(operator.__or__, [~(x ^ flag_bits) & 0xfffff for x in curr_best_matches], initial=0)
             if bin(all_bits).count("1") < 20:
                 continue
 
