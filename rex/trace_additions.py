@@ -436,6 +436,7 @@ class ZenPlugin(SimStatePlugin):
     def get_expr_depth(self, expr):
         flag_args = self.get_flag_args(expr)
         flag_arg_vars = set.union(*[set(v.variables) for v in flag_args])
+        flag_arg_vars = set(v for v in flag_arg_vars if v.startswith("cgc-flag"))
         depth = max(self.depths.get(v, 0) for v in flag_arg_vars) + 1
         return depth
 
@@ -455,6 +456,7 @@ class ZenPlugin(SimStatePlugin):
     def get_flag_bytes(self, ast):
         flag_args = self.get_flag_args(ast)
         flag_arg_vars = set.union(*[set(v.variables) for v in flag_args])
+        flag_arg_vars = set(v for v in flag_arg_vars if v.startswith("cgc-flag"))
         contained_bytes = set()
         for v in flag_arg_vars:
             contained_bytes.update(self.byte_dict[v])
