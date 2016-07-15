@@ -396,7 +396,7 @@ def zen_register_write(state):
 
 
 class ZenPlugin(SimStatePlugin):
-    def __init__(self, max_depth=10):
+    def __init__(self, max_depth=13):
         SimStatePlugin.__init__(self)
         # dict from cache key to asts
         self.replacements = dict()
