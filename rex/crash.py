@@ -485,6 +485,7 @@ class Crash(object):
                     self.crash_type = Vulnerability.WRITE_X_WHERE
 
                 self.violating_action = sym_action
+                break
 
             if sym_action.action == "read":
                 # special vulnerability type, if this is detected we can explore the crash further
@@ -492,6 +493,7 @@ class Crash(object):
                 self.crash_type = Vulnerability.ARBITRARY_READ
 
                 self.violating_action = sym_action
+                break
 
         return
 
