@@ -1,6 +1,7 @@
 from simuvex import SimStatePlugin
 import simuvex
 import claripy
+from simuvex import SimMemoryError
 
 import string
 import logging
@@ -412,6 +413,8 @@ class ZenPlugin(SimStatePlugin):
         # ie (flagA + flagB == zen1234)
         self.zen_constraints = []
 
+        self.controlled_transmits = []
+
     def __getstate__(self):
         d = dict(self.__dict__)
         del d["tracer"]
@@ -451,6 +454,7 @@ class ZenPlugin(SimStatePlugin):
         z.tracer = self.tracer
         z.max_depth = self.max_depth
         z.zen_constraints = self.zen_constraints
+        z.controlled_transmits = self.controlled_transmits
         return z
 
     def get_flag_bytes(self, ast):
@@ -469,6 +473,13 @@ class ZenPlugin(SimStatePlugin):
             if con.cache_key in zen_cache_keys or not all(v.startswith("cgc-flag") for v in con.variables):
                 new_cons.append(con)
         return new_cons
+
+    def analyze_transmit(self, state, buf):
+        try:
+            state.memory.permissions(state.se.any_int(buf))
+        except SimMemoryError:
+            l.warning("detected possible arbitary transmit")
+            self.controlled_transmits.append((state.copy(), buf))
 
     @staticmethod
     def prep_tracer(tracer):

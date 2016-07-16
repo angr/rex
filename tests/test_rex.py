@@ -224,6 +224,27 @@ def test_exploit_yielding():
     nose.tools.assert_true(register_setters >= 3)
     nose.tools.assert_true(leakers >= 2)
 
+def test_arbitrary_transmit():
+    """
+    Test our ability to exploit an arbitrary transmit
+    """
+    crash_input = "A"*0x24
+    binary = os.path.join(bin_location, "tests/i386/arbitrary_transmit")
+    crash = rex.Crash(binary, crash_input)
+    zp = crash.state.get_plugin("zen_plugin")
+    nose.tools.assert_true(len(zp.controlled_transmits) == 1)
+    for state, buf in zp.controlled_transmits:
+        p = crash.project.factory.path(state)
+        crash._tracer.remove_preconstraints(p)
+        try:
+            leaking_state = crash._get_state_pointing_to_flag(state, buf)
+            flag_leak = leaking_state.posix.dumps(0)
+            cg = colorguard.ColorGuard(binary, flag_leak)
+
+            nose.tools.assert_true(cg.causes_leak())
+        except rex.CannotExploit:
+            raise Exception("should be exploitable")
+
 def test_quick_triage():
     '''
     Test our ability to triage crashes quickly.
