@@ -244,6 +244,7 @@ class Crash(object):
             raise CannotExploit("only arbitrary-reads can be exploited this way")
 
         self._reconstrain_flag_data()
+
         cp = self._get_state_pointing_to_flag(self.state, self.violating_action.addr)
         new_input = cp.posix.dumps(0)
 
@@ -407,18 +408,21 @@ class Crash(object):
         if not self._reconstrained_flag:
             l.info("reconstraining flag")
 
-            flag_bytes = self._tracer.cgc_flag_bytes
-            magic_bytes = self._tracer._magic_content
-
-            for b in range(0x1000):
-                v = flag_bytes[b]
-                b_bvv = self.state.se.BVV(magic_bytes[b])
-                self.state.add_constraints(b_bvv == v)
-
+            replace_dict = dict()
             for c in self._tracer.preconstraints:
-                if any([v.startswith('cgc-flag-zen') for v in list(c.variables)]):
-                    self.state.add_constraints(c)
-
+                if any([v.startswith('cgc-flag') for v in list(c.variables)]):
+                    concrete = next(a for a in c.args if not a.symbolic)
+                    symbolic = next(a for a in c.args if a.symbolic)
+                    replace_dict[symbolic.cache_key] = concrete
+            cons = self.state.se.constraints
+            new_cons = []
+            for c in cons:
+                new_c = c.replace_dict(replace_dict)
+                new_cons.append(new_c)
+            self.state.release_plugin("solver_engine")
+            self.state.add_constraints(*new_cons)
+            self.state.downsize()
+            self.state.se.simplify()
             self._reconstrained_flag = True
 
     @staticmethod
