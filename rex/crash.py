@@ -52,6 +52,9 @@ class Crash(object):
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
+        # has the flag already been reconstrained?
+        self._reconstrained_flag = False
+
         self.project = angr.Project(binary)
 
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
@@ -218,6 +221,8 @@ class Crash(object):
         if not self.explorable():
                 raise CannotExplore("non-explorable crash")
 
+        self._reconstrain_flag_data()
+
         assert self.violating_action is not None
 
         if self.crash_type in [Vulnerability.ARBITRARY_READ]:
@@ -234,8 +239,11 @@ class Crash(object):
         :param path_file: file to dump testcase to
         '''
 
+
         if not self.crash_type in [Vulnerability.ARBITRARY_READ]:
             raise CannotExploit("only arbitrary-reads can be exploited this way")
+
+        self._reconstrain_flag_data()
 
         # iterate over addr seeing if we can find an acceptable address to point to
         cgc_magic_page_addr = 0x4347c000
@@ -389,6 +397,25 @@ class Crash(object):
         return cp
 
 ### UTIL
+
+    def _reconstrain_flag_data(self):
+
+        if not self._reconstrained_flag:
+            l.info("reconstraining flag")
+
+            flag_bytes = self._tracer.cgc_flag_bytes
+            magic_bytes = self._tracer._magic_content
+
+            for b in range(0x1000):
+                v = flag_bytes[b]
+                b_bvv = self.state.se.BVV(magic_bytes[b])
+                self.state.add_constraints(b_bvv == v)
+
+            for c in self._tracer.preconstraints:
+                if any([v.startswith('cgc-flag-zen') for v in list(c.variables)]):
+                    self.state.add_constraints(c)
+
+            self._reconstrained_flag = True
 
     @staticmethod
     def _segment(memory_writes):

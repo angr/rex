@@ -351,6 +351,8 @@ def zen_hook(state, expr):
                 concrete_val = state.se.any_int(expr)
                 replacement = zen_plugin.replacements[expr.cache_key]
                 state.se._solver.add_replacement(replacement, concrete_val, invalidate_cache=False)
+                zen_plugin.tracer.preconstraints.append(replacement == concrete_val)
+                zen_plugin.preconstraints.append(replacement == concrete_val)
             else:
                 # we need to make a new replacement
                 replacement = claripy.BVS("cgc-flag-zen", expr.size())
@@ -375,6 +377,7 @@ def zen_hook(state, expr):
                 zen_plugin.depths[var] = depth
                 constraint = replacement == concrete_val
                 zen_plugin.tracer.preconstraints.append(constraint)
+                zen_plugin.preconstraints.append(replacement == concrete_val)
 
                 zen_plugin.replacements[expr.cache_key] = replacement
 
@@ -411,6 +414,8 @@ class ZenPlugin(SimStatePlugin):
         # the zen replacement constraints (the ones that don't preconstrain input)
         # ie (flagA + flagB == zen1234)
         self.zen_constraints = []
+
+        self.preconstraints = []
 
     def __getstate__(self):
         d = dict(self.__dict__)
@@ -451,6 +456,7 @@ class ZenPlugin(SimStatePlugin):
         z.tracer = self.tracer
         z.max_depth = self.max_depth
         z.zen_constraints = self.zen_constraints
+        z.preconstraints = list(self.preconstraints)
         return z
 
     def get_flag_bytes(self, ast):
@@ -496,3 +502,5 @@ class ZenPlugin(SimStatePlugin):
         for i, b in enumerate(tracer.cgc_flag_bytes):
             var = list(b.variables)[0]
             byte_dict[var] = {i}
+
+        tracer.preconstraints.extend(zen_plugin.preconstraints)
