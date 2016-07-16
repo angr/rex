@@ -260,10 +260,10 @@ class Crash(object):
         cgc_magic_page_addr = 0x4347c000
         if state.se.satisfiable(extra_constraints=
                                 (violating_addr >= cgc_magic_page_addr,
-                                 violating_addr < cgc_magic_page_addr+0x1000)):
+                                 violating_addr < cgc_magic_page_addr+0x1000-4)):
             cp = state.copy()
             cp.add_constraints(violating_addr >= cgc_magic_page_addr)
-            cp.add_constraints(violating_addr < cgc_magic_page_addr+0x1000)
+            cp.add_constraints(violating_addr < cgc_magic_page_addr+0x1000-4)
             return cp
         else:
             raise CannotExploit("unable to point arbitrary-read at the flag page")
