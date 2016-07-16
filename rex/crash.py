@@ -244,19 +244,7 @@ class Crash(object):
             raise CannotExploit("only arbitrary-reads can be exploited this way")
 
         self._reconstrain_flag_data()
-
-        # iterate over addr seeing if we can find an acceptable address to point to
-        cgc_magic_page_addr = 0x4347c000
-        addr = cgc_magic_page_addr
-        while addr < cgc_magic_page_addr + 0x1000 and \
-            not self.state.se.satisfiable(extra_constraints=(self.violating_action.addr == addr,)):
-            addr += 1
-
-        if addr >= cgc_magic_page_addr + 0x1000:
-            raise CannotExploit("unable to point arbitrary-read at the flag page")
-
-        cp = self.state.copy()
-        cp.add_constraints(self.violating_action.addr == addr)
+        cp = self._get_state_pointing_to_flag(self.state, self.violating_action.addr)
         new_input = cp.posix.dumps(0)
 
         if path_file is not None:
@@ -264,6 +252,22 @@ class Crash(object):
                 f.write(new_input)
 
         return new_input
+
+    @staticmethod
+    def _get_state_pointing_to_flag(state, violating_addr):
+        # see if we can point at flag
+        cgc_magic_page_addr = 0x4347c000
+        if state.se.satisfiable(extra_constraints=
+                                (violating_addr >= cgc_magic_page_addr,
+                                 violating_addr < cgc_magic_page_addr+0x1000)):
+            cp = state.copy()
+            cp.add_constraints(violating_addr >= cgc_magic_page_addr)
+            cp.add_constraints(violating_addr < cgc_magic_page_addr+0x1000)
+            return cp
+        else:
+            raise CannotExploit("unable to point arbitrary-read at the flag page")
+
+
 
     def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a
