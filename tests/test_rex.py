@@ -13,7 +13,7 @@ logging.getLogger("povsim").setLevel("INFO")
 
 def _do_pov_test(pov, enable_randomness=True):
     ''' Test a POV '''
-    for i in range(10):
+    for _ in range(10):
         if pov.test_binary(enable_randomness=enable_randomness):
             return True
     return False
@@ -272,6 +272,7 @@ def test_quick_triage():
             ("A" * 512, "tests/i386/vuln_vptr_smash", Vulnerability.ARBITRARY_READ),
             ("00ea01ffe7fffffffbe3c0d9d9d9d9d9d9d9d9e6e6e6000000e90beae9e9e9e9e9e9d9e6e6e6000000e9e9e9e9e90000f320e9e9e9e9e9e9e900008000e3e3e3e3e3e3e3e3e3e3e3e3e3d8e3e3e3e3e3d2e3e3e3e3e3e3e9e9e9e97fffe9e9e9e9e9e9f1e9e9e9f6e9e9e9e9e9e9e9e9ebe9e9e9e9e9e9e9e9e9e9e9ffff8080e990e9e9ece9e9e9e9e9e9e9e9e9e9e90000ff20e9e9e9e9e9e9e900008000e3e3e3e3e3e3e3e3e3e3e3e3e3e3dde3e3e3e3e3e3e3e3e3e3e3e9e9e9f27fffe9a9e9e9e9e9f1e9e9e9e9e9e9e9e9e9e9e9e9ebe9e9e9e90080e9e91001e9e9e90000d9d9d9d9d9d9d9d9c2d9dae60200".decode('hex'), "cgc_qualifier_event/cgc/474a5e01_01", Vulnerability.NULL_DEREFERENCE),
             ("6675e263640a6e65777a64656c6976657265720a25642525252525252525252525252525257373732525252525252525620a0a0a160a6e6577a670697a7a610a646572656465656c6376300a0a0a0a0a64656c69766572658110006c6976657065720a0a0a8a304a0a0a0a0a64656c697665726564720a720a0a937a770a0a0a0f64656c6976657265720a0a0a8a6e7a5800110f64656c6976657265".decode('hex'), "shellphish/PIZZA_00002", Vulnerability.NULL_DEREFERENCE),
+            ("ac0bfffc100000acffffff1c9fc01600100000acffffff1c9fc01600009b0bfffe2f0000".decode('hex'), "tests/i386/arbitrary_transmit", Vulnerability.ARBITRARY_TRANSMIT),
     ]
 
     for tup in crash_tuples:

@@ -544,12 +544,22 @@ class Crash(object):
         """
 
         l.debug("quick triaging crash against '%s'", binary)
+
+        arbitrary_syscall_arg = False
         r = tracer.Runner(binary, crash)
         if not r.crash_mode:
-            raise NonCrashingInput("input did not cause a crash")
+
+            # try again to catch bad args
+            r = tracer.Runner(binary, crash, report_bad_args=True)
+            arbitrary_syscall_arg = True
+            if not r.crash_mode:
+                raise NonCrashingInput("input did not cause a crash")
+
+            l.debug("detected an arbitrary transmit or receive")
 
         if r.os != "cgc":
             raise ValueError("quick_triage is only available for CGC binaries")
+
 
         project = angr.Project(binary)
         # triage the crash based of the register values and memory at crashtime
@@ -557,6 +567,20 @@ class Crash(object):
 
         pc = r.reg_vals['eip']
         l.debug('crash occured at %#x', pc)
+
+        if arbitrary_syscall_arg:
+            l.debug("checking which system call had bad args")
+
+            syscall_num = r.reg_vals['eax']
+            vulns = {2: Vulnerability.ARBITRARY_TRANSMIT, \
+                     3: Vulnerability.ARBITRARY_RECEIVE}
+
+            # shouldn't ever happen but in case it does
+            if syscall_num not in vulns:
+                return pc, None
+
+            return pc, vulns[syscall_num]
+
         l.debug("checking if ip is null")
         if pc < 0x1000:
             return pc, Vulnerability.NULL_DEREFERENCE
