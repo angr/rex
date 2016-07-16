@@ -245,6 +245,21 @@ def test_arbitrary_transmit():
         except rex.CannotExploit:
             raise Exception("should be exploitable")
 
+def test_reconstraining():
+    """
+    Test our ability to reconstrain
+    """
+
+    crash_input = "cac8c9c8c8aaa8c9c9c9cd3b852d026763c9cdc2c9c937ffefcacac8c8c8aaa8c9c9c9cd3b852d028686868669698686866763c9d9c2c9c937fff8cacac8c8c8aaa8c9c9c9cd3b632d026760c9e7c2cec937ff4379626572312d00b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b838b8b8b8b8a9b8b898b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8a4b8b8b8b8b8b8ccb8b8b8b8b8b8b8b8b8b8b8b8bfb86368616c6c656e6765b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8c9c9cd3b852d028686868669698686866763c9d9c2c9c937fff8cacac8c8c8aaa8c9c9c9cd3b632db16760c9e7c2cec937ff4379626572312d00b8b8b8b8b3b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8d0b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8c4b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8ccb8b8b8b8b8b8b8b8b8b8b8b8bfb86368616c6c656e6765b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8c9cdc2c9c937ffefcacac8c8c8aaa8c9c9c9cd3b852d028686868669698686866763c9d9c2c9c937fff8cacac8c8c8aaa8c9c9c9cd3b632d026760c9e7c2cec937ff4379626572312d00b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b838b8b8b8b8a9b8b8b8b8b8b8b8b8b8c8b6a8c9c9c9cd3b632d0b6760c9cdc2c9c9377f61796299e1e1e1e1e171".decode("hex")
+
+    binary = os.path.join(bin_location, "shellphish/PIZZA_00003")
+
+    crash = rex.Crash(binary, crash_input)
+
+    ptfi = crash.point_to_flag()
+
+    nose.tools.assert_true(ptfi.startswith("cac8c9c8c8".decode("hex")))
+
 def test_quick_triage():
     '''
     Test our ability to triage crashes quickly.
