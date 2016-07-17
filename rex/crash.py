@@ -52,9 +52,6 @@ class Crash(object):
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
-        # has the flag already been reconstrained?
-        self._reconstrained_flag = False
-
         self.project = angr.Project(binary)
 
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
@@ -422,7 +419,6 @@ class Crash(object):
         cp.violating_action = self.violating_action
         cp.explore_steps = self.explore_steps
         cp.constrained_addrs = list(self.constrained_addrs)
-        cp._reconstrained_flag = self._reconstrained_flag
 
         return cp
 
@@ -430,25 +426,23 @@ class Crash(object):
 
     def _reconstrain_flag_data(self, state):
 
-        if not self._reconstrained_flag:
-            l.info("reconstraining flag")
+        l.info("reconstraining flag")
 
-            replace_dict = dict()
-            for c in self._tracer.preconstraints:
-                if any([v.startswith('cgc-flag') for v in list(c.variables)]):
-                    concrete = next(a for a in c.args if not a.symbolic)
-                    symbolic = next(a for a in c.args if a.symbolic)
-                    replace_dict[symbolic.cache_key] = concrete
-            cons = state.se.constraints
-            new_cons = []
-            for c in cons:
-                new_c = c.replace_dict(replace_dict)
-                new_cons.append(new_c)
-            state.release_plugin("solver_engine")
-            state.add_constraints(*new_cons)
-            state.downsize()
-            state.se.simplify()
-            self._reconstrained_flag = True
+        replace_dict = dict()
+        for c in self._tracer.preconstraints:
+            if any([v.startswith('cgc-flag') for v in list(c.variables)]):
+                concrete = next(a for a in c.args if not a.symbolic)
+                symbolic = next(a for a in c.args if a.symbolic)
+                replace_dict[symbolic.cache_key] = concrete
+        cons = state.se.constraints
+        new_cons = []
+        for c in cons:
+            new_c = c.replace_dict(replace_dict)
+            new_cons.append(new_c)
+        state.release_plugin("solver_engine")
+        state.add_constraints(*new_cons)
+        state.downsize()
+        state.se.simplify()
 
     def one_of(self, crash_types):
         '''
