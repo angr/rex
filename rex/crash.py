@@ -175,10 +175,18 @@ class Crash(object):
         :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
         '''
 
-        explorables = [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE,
-                Vulnerability.ARBITRARY_TRANSMIT, Vulnerability.ARBITRARY_RECEIVE]
+        # TODO add arbitrary receive into this list
+        explorables = [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
 
         return self.one_of(explorables)
+
+    def leakable(self):
+        '''
+        determine if the crash can potentially cause an information leak using the point-to-flag technique
+        :return: True if the 'point-to-flag' technique can be applied to this crash
+        '''
+
+        return self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT])
 
     def _prepare_exploit_factory(self, blacklist_symbolic_explore=True, **kwargs):
         # crash should have been classified at this point
@@ -236,7 +244,7 @@ class Crash(object):
         elif self.one_of([Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]):
             self._explore_arbitrary_write(path_file)
         else:
-            raise ValueError("unknown explorable crash type: %s", self.crash_types)
+            raise CannotExplore("unknown explorable crash type: %s", self.crash_types)
 
     def point_to_flag(self):
         '''
