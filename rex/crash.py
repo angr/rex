@@ -269,8 +269,8 @@ class Crash(object):
                 violating_actions.append((st, addr))
 
         for st, va in violating_actions:
-            self._reconstrain_flag_data(st)
             cp = self._get_state_pointing_to_flag(st, va)
+            self._reconstrain_flag_data(cp)
             new_inputs.append(cp.posix.dumps(0))
 
         return new_inputs
