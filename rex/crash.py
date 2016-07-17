@@ -398,6 +398,7 @@ class Crash(object):
         cp.violating_action = self.violating_action
         cp.explore_steps = self.explore_steps
         cp.constrained_addrs = list(self.constrained_addrs)
+        cp._reconstrained_flag = self._reconstrained_flag
 
         return cp
 
