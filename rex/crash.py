@@ -112,10 +112,10 @@ class Crash(object):
 
             # if there was no crash we'll have to use the previous path's state
             if crash_state is None:
-                self.state = self.prev.state
+                self.state = prev.state
             else:
                 # the state at crash time
-                self.state  = crash_state
+                self.state = crash_state
 
             zp = self.state.get_plugin('zen_plugin')
             if crash_state is None and (zp is not None and len(zp.controlled_transmits) == 0):
