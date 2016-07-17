@@ -47,7 +47,7 @@ def test_legit_00003():
     crash = rex.Crash(os.path.join(bin_location, "defcon24/legit_00003"), crash)
 
     nose.tools.assert_true(crash.explorable())
-    nose.tools.assert_equals(crash.crash_type, Vulnerability.WRITE_WHAT_WHERE)
+    nose.tools.assert_true(crash.one_of(Vulnerability.WRITE_WHAT_WHERE))
 
     crash.explore()
 
@@ -71,11 +71,13 @@ def test_controlled_printf():
     binary = os.path.join(bin_location, "tests/i386/controlled_printf")
     crash = rex.Crash(binary, crash)
 
-    nose.tools.assert_equals(crash.crash_type, Vulnerability.ARBITRARY_READ)
+    nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_READ))
 
-    flag_leak = crash.point_to_flag()
+    flag_leaks = crash.point_to_flag()
 
-    cg = colorguard.ColorGuard(binary, flag_leak)
+    nose.tools.assert_true(len(flag_leaks) >= 1)
+
+    cg = colorguard.ColorGuard(binary, flag_leaks[0])
 
     nose.tools.assert_true(cg.causes_leak())
 
@@ -136,7 +138,7 @@ def test_cpp_vptr_smash():
 
     # this should just tell us that we have an arbitrary-read and that the crash type is explorable
     # but not exploitable
-    nose.tools.assert_equal(crash.crash_type, Vulnerability.ARBITRARY_READ)
+    nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_READ))
     nose.tools.assert_false(crash.exploitable())
     nose.tools.assert_true(crash.explorable())
 
@@ -233,15 +235,18 @@ def test_arbitrary_transmit():
     crash = rex.Crash(binary, crash_input)
     zp = crash.state.get_plugin("zen_plugin")
     nose.tools.assert_true(len(zp.controlled_transmits) == 1)
-    for state, buf in zp.controlled_transmits:
-        p = crash.project.factory.path(state)
-        crash._tracer.remove_preconstraints(p)
-        try:
-            leaking_state = crash._get_state_pointing_to_flag(state, buf)
-            flag_leak = leaking_state.posix.dumps(0)
-            cg = colorguard.ColorGuard(binary, flag_leak)
 
+    flag_leaks = crash.point_to_flag()
+
+    nose.tools.assert_true(len(flag_leaks) >= 1)
+
+    for ptfi in flag_leaks:
+        try:
+            cg = colorguard.ColorGuard(binary, ptfi)
             nose.tools.assert_true(cg.causes_leak())
+            pov = cg.attempt_exploit()
+            nose.tools.assert_true(pov.test_binary())
+
         except rex.CannotExploit:
             raise Exception("should be exploitable")
 
@@ -258,7 +263,8 @@ def test_reconstraining():
 
     ptfi = crash.point_to_flag()
 
-    nose.tools.assert_true(ptfi.startswith("cac8c9c8c8".decode("hex")))
+    nose.tools.assert_equals(len(ptfi), 1)
+    nose.tools.assert_true(ptfi[0].startswith("cac8c9c8c8".decode("hex")))
 
 def test_quick_triage():
     '''

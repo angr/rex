@@ -103,8 +103,9 @@ class Crash(object):
             if self.project.loader.main_bin.os == 'cgc':
 
                 if not tracer.Runner(binary, input=self.crash).crash_mode:
-                    l.warning("input did not cause a crash")
-                    raise NonCrashingInput
+                    if not tracer.Runner(binary, input=self.crash, report_bad_args=True).crash_mode:
+                        l.warning("input did not cause a crash")
+                        raise NonCrashingInput
 
             self._tracer = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False,
                                          hooks=self.hooks, add_options=add_options, remove_options=remove_options)
@@ -112,7 +113,9 @@ class Crash(object):
             ZenPlugin.prep_tracer(self._tracer)
             prev, crash_state = self._tracer.run(constrained_addrs)
 
-            if crash_state is None:
+            zp = crash_state.get_plugin('zen_plugin')
+
+            if crash_state is None and zp is not None and len(zp.controlled_transmits):
                 l.warning("input did not cause a crash")
                 raise NonCrashingInput
 
@@ -146,7 +149,7 @@ class Crash(object):
         self.flag_mem = self._segment(flag_writes)
 
         # crash type
-        self.crash_type = None
+        self.crash_types = [ ]
         # action (in case of a bad write or read) which caused the crash
         self.violating_action = None
 
@@ -164,7 +167,7 @@ class Crash(object):
         exploitables = [Vulnerability.IP_OVERWRITE, Vulnerability.PARTIAL_IP_OVERWRITE, Vulnerability.BP_OVERWRITE,
                 Vulnerability.PARTIAL_BP_OVERWRITE, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
 
-        return self.crash_type in exploitables
+        return self.one_of(exploitables)
 
     def explorable(self):
         '''
@@ -172,7 +175,7 @@ class Crash(object):
         :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
         '''
 
-        return self.crash_type in [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
+        return self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE])
 
     def _prepare_exploit_factory(self, blacklist_symbolic_explore=True, **kwargs):
         # crash should have been classified at this point
@@ -221,38 +224,44 @@ class Crash(object):
         if not self.explorable():
                 raise CannotExplore("non-explorable crash")
 
-        self._reconstrain_flag_data()
+        self._reconstrain_flag_data(self.state)
 
         assert self.violating_action is not None
 
-        if self.crash_type in [Vulnerability.ARBITRARY_READ]:
+        if self.one_of([Vulnerability.ARBITRARY_READ]):
             self._explore_arbitrary_read(path_file)
-        elif self.crash_type in [Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]:
+        elif self.one_of([Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]):
             self._explore_arbitrary_write(path_file)
         else:
-            raise ValueError("unknown explorable crash type: %s", self.crash_type)
+            raise ValueError("unknown explorable crash type: %s", self.crash_types)
 
-    def point_to_flag(self, path_file=None):
+    def point_to_flag(self):
         '''
         Create a testcase which points an arbitrary-read crash at the flag page.
-
-        :param path_file: file to dump testcase to
         '''
 
-
-        if not self.crash_type in [Vulnerability.ARBITRARY_READ]:
+        if not self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT]):
             raise CannotExploit("only arbitrary-reads can be exploited this way")
 
-        self._reconstrain_flag_data()
+        new_inputs = [ ]
+        violating_actions = [ ]
 
-        cp = self._get_state_pointing_to_flag(self.state, self.violating_action.addr)
-        new_input = cp.posix.dumps(0)
+        if self.one_of([Vulnerability.ARBITRARY_READ]):
+            if self.violating_action:
+                violating_actions.append((self.state, self.violating_action.addr))
 
-        if path_file is not None:
-            with open(path_file, 'w') as f:
-                f.write(new_input)
+        zp = self.state.get_plugin('zen_plugin')
+        if zp is not None:
+            for st, addr in zp.controlled_transmits:
+                self._tracer.remove_preconstraints(self.project.factory.path(st))
+                violating_actions.append((st, addr))
 
-        return new_input
+        for st, va in violating_actions:
+            self._reconstrain_flag_data(st)
+            cp = self._get_state_pointing_to_flag(st, va)
+            new_inputs.append(cp.posix.dumps(0))
+
+        return new_inputs
 
     @staticmethod
     def _get_state_pointing_to_flag(state, violating_addr):
@@ -393,7 +402,7 @@ class Crash(object):
         cp.rop = self.rop
         cp.added_actions = list(self.added_actions)
         cp.symbolic_mem = self.symbolic_mem.copy()
-        cp.crash_type = self.crash_type
+        cp.crash_types = self.crash_types
         cp._tracer = self._tracer
         cp.violating_action = self.violating_action
         cp.explore_steps = self.explore_steps
@@ -404,7 +413,7 @@ class Crash(object):
 
 ### UTIL
 
-    def _reconstrain_flag_data(self):
+    def _reconstrain_flag_data(self, state):
 
         if not self._reconstrained_flag:
             l.info("reconstraining flag")
@@ -415,16 +424,26 @@ class Crash(object):
                     concrete = next(a for a in c.args if not a.symbolic)
                     symbolic = next(a for a in c.args if a.symbolic)
                     replace_dict[symbolic.cache_key] = concrete
-            cons = self.state.se.constraints
+            cons = state.se.constraints
             new_cons = []
             for c in cons:
                 new_c = c.replace_dict(replace_dict)
                 new_cons.append(new_c)
-            self.state.release_plugin("solver_engine")
-            self.state.add_constraints(*new_cons)
-            self.state.downsize()
-            self.state.se.simplify()
+            state.release_plugin("solver_engine")
+            state.add_constraints(*new_cons)
+            state.downsize()
+            state.se.simplify()
             self._reconstrained_flag = True
+
+    def one_of(self, crash_types):
+        '''
+        Test if a self's crash has one of the vulnerabilities described in crash_types
+        '''
+
+        if not isinstance(crash_types, (list, tuple)):
+            crash_types = [crash_types]
+
+        return bool(len(set(self.crash_types).intersection(set(crash_types))))
 
     @staticmethod
     def _segment(memory_writes):
@@ -477,15 +496,22 @@ class Crash(object):
         ip = self.state.regs.ip
         bp = self.state.regs.bp
 
+        # any arbitrary receives or transmits
+        # TODO: receives
+        zp = self.state.get_plugin('zen_plugin')
+        if zp is not None and len(zp.controlled_transmits):
+            l.debug("detected arbitrary transmit vulnerability")
+            self.crash_types.append(Vulnerability.ARBITRARY_TRANSMIT)
+
         # we assume a symbolic eip is always exploitable
         if self.state.se.symbolic(ip):
             # how much control of ip do we have?
             if self._symbolic_control(ip) >= self.state.arch.bits:
                 l.info("detected ip overwrite vulnerability")
-                self.crash_type = Vulnerability.IP_OVERWRITE
+                self.crash_types.append(Vulnerability.IP_OVERWRITE)
             else:
                 l.info("detected partial ip overwrite vulnerability")
-                self.crash_type = Vulnerability.PARTIAL_IP_OVERWRITE
+                self.crash_types.append(Vulnerability.PARTIAL_IP_OVERWRITE)
 
             return
 
@@ -493,10 +519,10 @@ class Crash(object):
             # how much control of bp do we have
             if self._symbolic_control(bp) >= self.state.arch.bits:
                 l.info("detected bp overwrite vulnerability")
-                self.crash_type = Vulnerability.BP_OVERWRITE
+                self.crash_types.append(Vulnerability.BP_OVERWRITE)
             else:
                 l.info("detected partial bp overwrite vulnerability")
-                self.crash_type = Vulnerability.PARTIAL_BP_OVERWRITE
+                self.crash_types.append(Vulnerability.PARTIAL_BP_OVERWRITE)
 
             return
 
@@ -515,10 +541,10 @@ class Crash(object):
             if sym_action.action == "write":
                 if self.state.se.symbolic(sym_action.data):
                     l.info("detected write-what-where vulnerability")
-                    self.crash_type = Vulnerability.WRITE_WHAT_WHERE
+                    self.crash_types.append(Vulnerability.WRITE_WHAT_WHERE)
                 else:
                     l.info("detected write-x-where vulnerability")
-                    self.crash_type = Vulnerability.WRITE_X_WHERE
+                    self.crash_types.append(Vulnerability.WRITE_X_WHERE)
 
                 self.violating_action = sym_action
                 break
@@ -526,7 +552,7 @@ class Crash(object):
             if sym_action.action == "read":
                 # special vulnerability type, if this is detected we can explore the crash further
                 l.info("detected arbitrary-read vulnerability")
-                self.crash_type = Vulnerability.ARBITRARY_READ
+                self.crash_types.append(Vulnerability.ARBITRARY_READ)
 
                 self.violating_action = sym_action
                 break
