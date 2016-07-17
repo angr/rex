@@ -581,7 +581,7 @@ class Crash(object):
         l.debug("quick triaging crash against '%s'", binary)
 
         arbitrary_syscall_arg = False
-        r = tracer.Runner(binary, crash)
+        r = tracer.Runner(binary, crash, use_tiny_core=True)
         if not r.crash_mode:
 
             # try again to catch bad args
@@ -621,10 +621,13 @@ class Crash(object):
             return pc, Vulnerability.NULL_DEREFERENCE
 
         l.debug("checking if ip register points to executable memory")
+
+        start_state = project.factory.entry_state(addr=pc)
+
         # was ip mapped?
         ip_overwritten = False
         try:
-            perms = r.memory.permissions(pc)
+            perms = start_state.memory.permissions(pc)
             # check if the execute bit is marked, this is an AST
             l.debug("ip points to mapped memory")
             if not perms.symbolic and not ((perms & 4) == 4).args[0]:
@@ -649,9 +652,8 @@ class Crash(object):
             l.debug("ip appears to be completely controlled")
             return pc, Vulnerability.IP_OVERWRITE
 
-        l.debug("checking if a read or write caused the crash")
         # wasn't an ip overwrite, check reads and writes
-        start_state = project.factory.entry_state(addr=pc)
+        l.debug("checking if a read or write caused the crash")
 
         # set registers
         start_state.regs.eax = r.reg_vals['eax']
@@ -687,7 +689,7 @@ class Crash(object):
                         return pc, Vulnerability.UNCONTROLLED_WRITE
 
                     try:
-                        perms = r.memory.permissions(target_addr)
+                        perms = start_state.memory.permissions(target_addr)
                         if not perms.symbolic and not ((perms & 2) == 2).args[0]:
                             l.debug("write attempt at a read-only page, assuming uncontrolled")
                             return pc, Vulnerability.UNCONTROLLED_WRITE
