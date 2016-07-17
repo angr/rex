@@ -175,7 +175,10 @@ class Crash(object):
         :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
         '''
 
-        return self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE])
+        explorables = [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE,
+                Vulnerability.ARBITRARY_TRANSMIT, Vulnerability.ARBITRARY_RECEIVE]
+
+        return self.one_of(explorables)
 
     def _prepare_exploit_factory(self, blacklist_symbolic_explore=True, **kwargs):
         # crash should have been classified at this point
