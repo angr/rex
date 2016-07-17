@@ -113,18 +113,22 @@ class Crash(object):
             ZenPlugin.prep_tracer(self._tracer)
             prev, crash_state = self._tracer.run(constrained_addrs)
 
-            zp = crash_state.get_plugin('zen_plugin')
+            # if there was no crash we'll have to use the previous path's state
+            if crash_state is None:
+                self.state = self.prev.state
+            else:
+                # the state at crash time
+                self.state  = crash_state
 
-            if crash_state is None and zp is not None and len(zp.controlled_transmits):
+            zp = self.state.get_plugin('zen_plugin')
+            if crash_state is None and (zp is not None and len(zp.controlled_transmits) == 0):
                 l.warning("input did not cause a crash")
                 raise NonCrashingInput
 
             l.debug("done tracing input")
             # a path leading up to the crashing basic block
-            self.prev   = prev
+            self.prev = prev
 
-            # the state at crash time
-            self.state  = crash_state
         else:
             self.state = crash_state
             self.prev = prev_path

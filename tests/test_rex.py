@@ -226,12 +226,9 @@ def test_exploit_yielding():
     nose.tools.assert_true(register_setters >= 3)
     nose.tools.assert_true(leakers >= 2)
 
-def test_arbitrary_transmit():
-    """
-    Test our ability to exploit an arbitrary transmit
-    """
+def _do_arbitrary_transmit_test_for(binary):
     crash_input = "A"*0x24
-    binary = os.path.join(bin_location, "tests/i386/arbitrary_transmit")
+    binary = os.path.join(bin_location, binary)
     crash = rex.Crash(binary, crash_input)
     zp = crash.state.get_plugin("zen_plugin")
     nose.tools.assert_true(len(zp.controlled_transmits) == 1)
@@ -250,6 +247,18 @@ def test_arbitrary_transmit():
         except rex.CannotExploit:
             raise Exception("should be exploitable")
 
+def test_arbitrary_transmit():
+    """
+    Test our ability to exploit an arbitrary transmit
+    """
+    _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit")
+
+def test_arbitrary_transmit_no_crash():
+    """
+    Test our ability to exploit an arbitrary transmit which does not cause a crash
+    """
+    _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit_no_crash")
+
 def test_reconstraining():
     """
     Test our ability to reconstrain
@@ -260,8 +269,9 @@ def test_reconstraining():
     binary = os.path.join(bin_location, "shellphish/PIZZA_00003")
 
     crash = rex.Crash(binary, crash_input)
+    cp = crash.copy()
 
-    ptfi = crash.point_to_flag()
+    ptfi = cp.point_to_flag()
 
     nose.tools.assert_equals(len(ptfi), 1)
     nose.tools.assert_true(ptfi[0].startswith("cac8c9c8c8".decode("hex")))
