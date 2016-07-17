@@ -13,7 +13,7 @@ logging.getLogger("povsim").setLevel("INFO")
 
 def _do_pov_test(pov, enable_randomness=True):
     ''' Test a POV '''
-    for i in range(10):
+    for _ in range(10):
         if pov.test_binary(enable_randomness=enable_randomness):
             return True
     return False
@@ -47,7 +47,7 @@ def test_legit_00003():
     crash = rex.Crash(os.path.join(bin_location, "defcon24/legit_00003"), crash)
 
     nose.tools.assert_true(crash.explorable())
-    nose.tools.assert_equals(crash.crash_type, Vulnerability.WRITE_WHAT_WHERE)
+    nose.tools.assert_true(crash.one_of(Vulnerability.WRITE_WHAT_WHERE))
 
     crash.explore()
 
@@ -71,11 +71,13 @@ def test_controlled_printf():
     binary = os.path.join(bin_location, "tests/i386/controlled_printf")
     crash = rex.Crash(binary, crash)
 
-    nose.tools.assert_equals(crash.crash_type, Vulnerability.ARBITRARY_READ)
+    nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_READ))
 
-    flag_leak = crash.point_to_flag()
+    flag_leaks = crash.point_to_flag()
 
-    cg = colorguard.ColorGuard(binary, flag_leak)
+    nose.tools.assert_true(len(flag_leaks) >= 1)
+
+    cg = colorguard.ColorGuard(binary, flag_leaks[0])
 
     nose.tools.assert_true(cg.causes_leak())
 
@@ -136,7 +138,7 @@ def test_cpp_vptr_smash():
 
     # this should just tell us that we have an arbitrary-read and that the crash type is explorable
     # but not exploitable
-    nose.tools.assert_equal(crash.crash_type, Vulnerability.ARBITRARY_READ)
+    nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_READ))
     nose.tools.assert_false(crash.exploitable())
     nose.tools.assert_true(crash.explorable())
 
@@ -224,26 +226,38 @@ def test_exploit_yielding():
     nose.tools.assert_true(register_setters >= 3)
     nose.tools.assert_true(leakers >= 2)
 
+def _do_arbitrary_transmit_test_for(binary):
+    crash_input = "A"*0x24
+    binary = os.path.join(bin_location, binary)
+    crash = rex.Crash(binary, crash_input)
+    zp = crash.state.get_plugin("zen_plugin")
+    nose.tools.assert_true(len(zp.controlled_transmits) == 1)
+
+    flag_leaks = crash.point_to_flag()
+
+    nose.tools.assert_true(len(flag_leaks) >= 1)
+
+    for ptfi in flag_leaks:
+        try:
+            cg = colorguard.ColorGuard(binary, ptfi)
+            nose.tools.assert_true(cg.causes_leak())
+            pov = cg.attempt_exploit()
+            nose.tools.assert_true(pov.test_binary())
+
+        except rex.CannotExploit:
+            raise Exception("should be exploitable")
+
 def test_arbitrary_transmit():
     """
     Test our ability to exploit an arbitrary transmit
     """
-    crash_input = "A"*0x24
-    binary = os.path.join(bin_location, "tests/i386/arbitrary_transmit")
-    crash = rex.Crash(binary, crash_input)
-    zp = crash.state.get_plugin("zen_plugin")
-    nose.tools.assert_true(len(zp.controlled_transmits) == 1)
-    for state, buf in zp.controlled_transmits:
-        p = crash.project.factory.path(state)
-        crash._tracer.remove_preconstraints(p)
-        try:
-            leaking_state = crash._get_state_pointing_to_flag(state, buf)
-            flag_leak = leaking_state.posix.dumps(0)
-            cg = colorguard.ColorGuard(binary, flag_leak)
+    _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit")
 
-            nose.tools.assert_true(cg.causes_leak())
-        except rex.CannotExploit:
-            raise Exception("should be exploitable")
+def test_arbitrary_transmit_no_crash():
+    """
+    Test our ability to exploit an arbitrary transmit which does not cause a crash
+    """
+    _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit_no_crash")
 
 def test_reconstraining():
     """
@@ -255,10 +269,12 @@ def test_reconstraining():
     binary = os.path.join(bin_location, "shellphish/PIZZA_00003")
 
     crash = rex.Crash(binary, crash_input)
+    cp = crash.copy()
 
-    ptfi = crash.point_to_flag()
+    ptfi = cp.point_to_flag()
 
-    nose.tools.assert_true(ptfi.startswith("cac8c9c8c8".decode("hex")))
+    nose.tools.assert_equals(len(ptfi), 1)
+    nose.tools.assert_true(ptfi[0].startswith("cac8c9c8c8".decode("hex")))
 
 def test_quick_triage():
     '''
@@ -272,6 +288,7 @@ def test_quick_triage():
             ("A" * 512, "tests/i386/vuln_vptr_smash", Vulnerability.ARBITRARY_READ),
             ("00ea01ffe7fffffffbe3c0d9d9d9d9d9d9d9d9e6e6e6000000e90beae9e9e9e9e9e9d9e6e6e6000000e9e9e9e9e90000f320e9e9e9e9e9e9e900008000e3e3e3e3e3e3e3e3e3e3e3e3e3d8e3e3e3e3e3d2e3e3e3e3e3e3e9e9e9e97fffe9e9e9e9e9e9f1e9e9e9f6e9e9e9e9e9e9e9e9ebe9e9e9e9e9e9e9e9e9e9e9ffff8080e990e9e9ece9e9e9e9e9e9e9e9e9e9e90000ff20e9e9e9e9e9e9e900008000e3e3e3e3e3e3e3e3e3e3e3e3e3e3dde3e3e3e3e3e3e3e3e3e3e3e9e9e9f27fffe9a9e9e9e9e9f1e9e9e9e9e9e9e9e9e9e9e9e9ebe9e9e9e90080e9e91001e9e9e90000d9d9d9d9d9d9d9d9c2d9dae60200".decode('hex'), "cgc_qualifier_event/cgc/474a5e01_01", Vulnerability.NULL_DEREFERENCE),
             ("6675e263640a6e65777a64656c6976657265720a25642525252525252525252525252525257373732525252525252525620a0a0a160a6e6577a670697a7a610a646572656465656c6376300a0a0a0a0a64656c69766572658110006c6976657065720a0a0a8a304a0a0a0a0a64656c697665726564720a720a0a937a770a0a0a0f64656c6976657265720a0a0a8a6e7a5800110f64656c6976657265".decode('hex'), "shellphish/PIZZA_00002", Vulnerability.NULL_DEREFERENCE),
+            ("ac0bfffc100000acffffff1c9fc01600100000acffffff1c9fc01600009b0bfffe2f0000".decode('hex'), "tests/i386/arbitrary_transmit", Vulnerability.ARBITRARY_TRANSMIT),
     ]
 
     for tup in crash_tuples:
