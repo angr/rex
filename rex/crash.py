@@ -568,20 +568,30 @@ class Crash(object):
 
         return
 
-### CLASS METHODS
-    @classmethod
-    def quick_triage(cls, binary, crash):
+class QuickCrash(object):
+
+    def __init__(self, binary, crash):
         """
         Quickly triage a crash with just QEMU. Less accurate, but much faster.
         :param binary: path to binary which crashed
         :param crash: input which caused crash
-        :return: a vulnerability classification and the value of eip where the crash occured
         """
+
+        self.binary = binary
+        self.crash = crash
+
+        self.bb_count = None
+        self.crash_pc, self.kind = self._quick_triage(binary, crash)
+
+    def _quick_triage(self, binary, crash):
 
         l.debug("quick triaging crash against '%s'", binary)
 
         arbitrary_syscall_arg = False
-        r = tracer.Runner(binary, crash, use_tiny_core=True)
+        r = tracer.Runner(binary, crash, record_trace=True, use_tiny_core=True)
+
+        self.bb_count = len(r.trace)
+
         if not r.crash_mode:
 
             # try again to catch bad args
@@ -593,7 +603,7 @@ class Crash(object):
             l.debug("detected an arbitrary transmit or receive")
 
         if r.os != "cgc":
-            raise ValueError("quick_triage is only available for CGC binaries")
+            raise ValueError("QuickCrash is only available for CGC binaries")
 
 
         project = angr.Project(binary)
