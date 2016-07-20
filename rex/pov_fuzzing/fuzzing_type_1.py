@@ -4,17 +4,23 @@ import tempfile
 import itertools
 from collections import defaultdict
 from multiprocessing import Pool
-from povsim import CGCPovSimulator
-
-import angr
-import tracer
-import compilerex
-import fuzzing_type_1_c_template
 
 l = logging.getLogger("rex.fuzzing_type_1")
 logging.getLogger("tracer.Runner").setLevel("WARNING")
 logging.getLogger("cle.elfcore").setLevel("CRITICAL")
 l.setLevel("DEBUG")
+
+try:
+    from povsim import CGCPovSimulator
+    import angr
+    import tracer
+    import compilerex
+    USE_ANGR=True
+except ImportError:
+    USE_ANGR=False
+    l.warning("using non-angr version")
+    from .custom_runner import CustomRunner
+import fuzzing_type_1_c_template
 
 
 NUM_CGC_BITS = 20
@@ -61,7 +67,10 @@ class ComplexAnalysisException(CrashFuzzerException):
 # have qemu write to stderr?
 def _get_reg_vals(binary_input_byte):
     binary, test_input, c = binary_input_byte
-    r = tracer.Runner(binary, input=test_input)
+    if USE_ANGR:
+        r = tracer.Runner(binary, input=test_input)
+    else:
+        r = CustomRunner(binary, payload=test_input)
     if not r.crash_mode:
         return [c, None]
     else:
@@ -190,8 +199,7 @@ class Type1CrashFuzzer(object):
 
             if num_diff == 0:
                 bytes_that_dont_affect_regs.add(c)
-            elif num_diff > 1 and reg_vals["eip"] != self.orig_regs["eip"] and \
-                    self._p.loader.main_bin.contains_addr(reg_vals["eip"]):
+            elif num_diff > 2 and reg_vals["eip"] != self.orig_regs["eip"]:
                 bytes_that_change_crash.add(c)
             else:
                 bytes_that_affect_regs.add(c)
@@ -224,8 +232,7 @@ class Type1CrashFuzzer(object):
 
             if num_diff == 0:
                 bytes_that_dont_affect_regs.add(c)
-            elif num_diff > 1 and reg_vals["eip"] != self.orig_regs["eip"] and \
-                    self._p.loader.main_bin.contains_addr(reg_vals["eip"]):
+            elif num_diff > 2 and reg_vals["eip"] != self.orig_regs["eip"]:
                 bytes_that_change_crash.add(c)
             else:
                 bytes_that_affect_regs.add(c)

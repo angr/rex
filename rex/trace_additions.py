@@ -172,11 +172,10 @@ def end_info_hook(state):
 
 
 def exit_hook(state):
-    # detect challenge response for fun
+    if not state.has_plugin("chall_resp_info"):
+        return
+
     guard = state.inspect.exit_guard
-    if any(v.startswith("cgc-flag") for v in guard.variables) and \
-            any(v.startswith("file_/dev/stdin") for v in guard.variables):
-        l.warning("Challenge response detected")
 
     # track the amount of stdout we had when a constraint was first added to a byte of stdin
     chall_resp_plugin = state.get_plugin("chall_resp_info")
@@ -189,6 +188,9 @@ def exit_hook(state):
                 stdin_min_stdout_constraints[byte_num] = stdout_pos
 
 def syscall_hook(state):
+    if not state.has_plugin("chall_resp_info"):
+        return
+
     # here we detect how much stdout we have when a byte is first read in
     syscall_name = state.inspect.syscall_name
     if syscall_name == "receive":
@@ -200,8 +202,22 @@ def syscall_hook(state):
             if i not in stdin_min_stdout_reads:
                 stdin_min_stdout_reads[i] = stdout_pos
 
+    # here we make random preconstrained instead of concrete A's
+    if syscall_name == "random":
+        num_bytes = state.se.any_int(state.regs.ecx)
+        buf = state.se.any_int(state.regs.ebx)
+        if num_bytes != 0:
+            rand_bytes = state.se.BVS("random", num_bytes*8)
+            concrete_val = state.se.BVV("A"*num_bytes)
+            state.se._solver.add_replacement(rand_bytes, concrete_val, invalidate_cache=False)
+            state.memory.store(buf, rand_bytes)
+
+
 
 def constraint_hook(state):
+    if not state.has_plugin("chall_resp_info"):
+        return
+
     # here we prevent adding constraints if there's a pending thing
     chall_resp_plugin = state.get_plugin("chall_resp_info")
     if chall_resp_plugin.pending_info is not None:
@@ -343,7 +359,7 @@ def zen_hook(state, expr):
 
     if expr.op not in claripy.operations.leaf_operations and expr.op != "Concat":
         # if there is more than one symbolic argument we replace it and preconstrain it
-        flag_args = ZenPlugin.get_flag_args(expr)
+        flag_args = ZenPlugin.get_flag_rand_args(expr)
         if len(flag_args) > 1:
             zen_plugin = state.get_plugin("zen_plugin")
 
@@ -433,18 +449,20 @@ class ZenPlugin(SimStatePlugin):
         self.state = None
 
     @staticmethod
-    def get_flag_args(expr):
+    def get_flag_rand_args(expr):
         symbolic_args = tuple(a for a in expr.args if isinstance(a, claripy.ast.Base) and a.symbolic)
         flag_args = []
         for a in symbolic_args:
-            if any(v.startswith("cgc-flag") for v in a.variables):
+            if any(v.startswith("cgc-flag") or v.startswith("random") for v in a.variables):
                 flag_args.append(a)
         return flag_args
 
     def get_expr_depth(self, expr):
-        flag_args = self.get_flag_args(expr)
+        flag_args = self.get_flag_rand_args(expr)
         flag_arg_vars = set.union(*[set(v.variables) for v in flag_args])
-        flag_arg_vars = set(v for v in flag_arg_vars if v.startswith("cgc-flag"))
+        flag_arg_vars = set(v for v in flag_arg_vars if v.startswith("cgc-flag") or v.startswith("random"))
+        if len(flag_arg_vars) == 0:
+            return 0
         depth = max(self.depths.get(v, 0) for v in flag_arg_vars) + 1
         return depth
 
@@ -464,19 +482,20 @@ class ZenPlugin(SimStatePlugin):
         return z
 
     def get_flag_bytes(self, ast):
-        flag_args = self.get_flag_args(ast)
+        flag_args = self.get_flag_rand_args(ast)
         flag_arg_vars = set.union(*[set(v.variables) for v in flag_args])
         flag_arg_vars = set(v for v in flag_arg_vars if v.startswith("cgc-flag"))
         contained_bytes = set()
         for v in flag_arg_vars:
-            contained_bytes.update(self.byte_dict[v])
+            if v in self.byte_dict:
+                contained_bytes.update(self.byte_dict[v])
         return contained_bytes
 
     def filter_constraints(self, constraints):
         zen_cache_keys = set(x.cache_key for x in self.zen_constraints)
         new_cons = [ ]
         for con in constraints:
-            if con.cache_key in zen_cache_keys or not all(v.startswith("cgc-flag") for v in con.variables):
+            if con.cache_key in zen_cache_keys or not all(v.startswith("cgc-flag") or v.startswith("random") for v in con.variables):
                 new_cons.append(con)
         return new_cons
 
