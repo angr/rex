@@ -49,6 +49,19 @@ def test_chall_response():
         nose.tools.assert_true(_do_pov_test(e))
 
 
+def test_chall_resp_rand():
+    crash_input = " (((" \
+                  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+                  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+                  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+    crash = rex.Crash(bin_location + "/tests/i386/overflow_after_chall_resp_rand", crash=crash_input)
+    exploit_f = crash.exploit()
+    for e in exploit_f.register_setters:
+        nose.tools.assert_true(_do_pov_test(e))
+    for e in exploit_f.leakers:
+        nose.tools.assert_true(_do_pov_test(e))
+
+
 def run_all():
     functions = globals()
     all_functions = dict(filter((lambda (k, v): k.startswith('test_')), functions.items()))
