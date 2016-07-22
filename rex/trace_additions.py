@@ -495,7 +495,10 @@ class ZenPlugin(SimStatePlugin):
         zen_cache_keys = set(x.cache_key for x in self.zen_constraints)
         new_cons = [ ]
         for con in constraints:
-            if con.cache_key in zen_cache_keys or not all(v.startswith("cgc-flag") or v.startswith("random") for v in con.variables):
+            if con.cache_key in zen_cache_keys or \
+                    not all(v.startswith("cgc-flag") or
+                    v.startswith("random") for v in con.variables) or \
+                    len(con.variables) == 0:
                 new_cons.append(con)
         return new_cons
 
