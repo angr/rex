@@ -251,7 +251,6 @@ class Crash(object):
         '''
         Create a testcase which points an arbitrary-read crash at the flag page.
         '''
-
         if not self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT]):
             raise CannotExploit("only arbitrary-reads can be exploited this way")
 
@@ -271,7 +270,7 @@ class Crash(object):
         for st, va in violating_actions:
             cp = self._get_state_pointing_to_flag(st, va)
             self._reconstrain_flag_data(cp)
-            new_inputs.append(cp.posix.dumps(0))
+            new_inputs.append(ChallRespInfo.atoi_dumps(cp))
 
         return new_inputs
 
@@ -332,7 +331,7 @@ class Crash(object):
 
         l.info("starting a new crash exploration phase based off the crash at address 0x%x", self.violating_action.ins_addr)
 
-        new_input = self.state.posix.dumps(0)
+        new_input = ChallRespInfo.atoi_dumps(self.state)
         if path_file is not None:
             l.info("dumping new crash evading input into file '%s'", path_file)
             with open(path_file, 'w') as f:
@@ -387,8 +386,7 @@ class Crash(object):
 
         l.info("starting a new crash exploration phase based off the crash at address %#x",
                 self.violating_action.ins_addr)
-
-        new_input = self.state.posix.dumps(0)
+        new_input = ChallRespInfo.atoi_dumps(self.state)
         if path_file is not None:
             l.info("dumping new crash evading input into file '%s'", path_file)
             with open(path_file, 'w') as f:
@@ -423,7 +421,6 @@ class Crash(object):
         return cp
 
 ### UTIL
-
     def _reconstrain_flag_data(self, state):
 
         l.info("reconstraining flag")
