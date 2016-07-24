@@ -21,7 +21,7 @@ class FormatInfo(object):
 
 
 class FormatInfoStrToInt(FormatInfo):
-    def __init__(self, addr, func_name, str_arg_num, base, base_arg):
+    def __init__(self, addr, func_name, str_arg_num, base, base_arg, allows_negative):
         # the address of the function
         self.addr = addr
         # the name of the function
@@ -32,13 +32,15 @@ class FormatInfoStrToInt(FormatInfo):
         self.base = base
         # the argument which represents the base
         self.base_arg = base_arg
+        # whether or not negatives can be passed
+        self.allows_negative = allows_negative
         # the input_val (computed at the start of function call)
         self.input_val = None
         self.input_base = None
 
     def copy(self):
         out = FormatInfoStrToInt(self.addr, self.func_name, self.str_arg_num,
-                                 self.base, self.base_arg)
+                                 self.base, self.base_arg, self.allows_negative)
         return out
 
     def compute(self, state):
@@ -87,40 +89,73 @@ class FormatInfoIntToStr(FormatInfo):
         return "IntToStr"
 
 
+class FormatInfoDontConstrain(FormatInfo):
+    def __init__(self, addr, func_name, check_symbolic_arg):
+        self.addr = addr
+        self.func_name = func_name
+        self.check_symbolic_arg = check_symbolic_arg
+
+    def copy(self):
+        out = FormatInfoDontConstrain(self.addr, self.func_name, self.check_symbolic_arg)
+        return out
+
+    def compute(self, state):
+        pass
+
+    def get_type(self):
+        return "DontConstrain"
+
+
+def int2base(x, base):
+    digs = string.digits + string.letters
+    if x < 0:
+        sign = -1
+    elif x == 0:
+        return digs[0]
+    else:
+        sign = 1
+    x *= sign
+    digits = []
+    while x:
+        digits.append(digs[x % base])
+        x /= base
+    if sign < 0:
+        digits.append('-')
+    digits.reverse()
+    return ''.join(digits)
+
+
 def generic_info_hook(state):
     addr = state.se.any_int(state.regs.ip)
     chall_resp_plugin = state.get_plugin("chall_resp_info")
+
+    format_info = chall_resp_plugin.format_infos[addr].copy()
+    if format_info.get_type() == "DontConstrain":
+        arg_num = format_info.check_symbolic_arg
+        arg = simuvex.s_cc.SimCCCdecl(state.arch).arg(state, arg_num)
+        if state.mem[arg].string.resolved.symbolic:
+            l.warning("symbolic arg not hooking")
+            return
+
+    # remove a current pending info
+    if chall_resp_plugin.pending_info is not None:
+        chall_resp_plugin.backup_pending_info.append((chall_resp_plugin.ret_addr_to_unhook,
+                                                      chall_resp_plugin.pending_info))
+        # undo the stops
+        chall_resp_plugin.project.unhook(chall_resp_plugin.ret_addr_to_unhook)
+        chall_resp_plugin.ret_addr_to_unhook = None
+        chall_resp_plugin.pending_info = None
 
     # hook the return address
     ret_addr = state.se.any_int(state.memory.load(state.regs.sp, 4, endness="Iend_LE"))
     chall_resp_plugin.ret_addr_to_unhook = ret_addr
     chall_resp_plugin.project.hook(ret_addr, end_info_hook, length=0)
 
-    format_info = chall_resp_plugin.format_infos[addr].copy()
     format_info.compute(state)
-    l.debug("starting hook for %s at %#x", format_info.func_name, format_info.addr)
+
     chall_resp_plugin.pending_info = format_info
+    l.debug("starting hook for %s at %#x", format_info.func_name, format_info.addr)
 
-
-"""
-def get_actual_int_len(state, bv, base):
-    valid_chars = set()
-    for i in range(base):
-        if i < 10:
-            valid_chars.add(chr(ord("0")+i))
-        if i >= 10:
-            valid_chars.add(chr(ord("A")+i-10))
-            valid_chars.add(chr(ord("a")+i-10))
-
-    the_int = state.se.any_str(bv)
-    found_start = False
-    for i in range(len(the_int)):
-        if the_int[i] in valid_chars:
-            found_start = True
-        if found_start and the_int[i] not in valid_chars:
-            return i
-    return len(the_int)
-"""
 
 def end_info_hook(state):
     chall_resp_plugin = state.get_plugin("chall_resp_info")
@@ -134,19 +169,30 @@ def end_info_hook(state):
     # replace the result with a symbolic variable
     # also add a constraint that points out what the input is
     if pending_info.get_type() == "StrToInt":
-        # result constraint
+        # mark the input
+        input_val = state.mem[pending_info.input_val].string.resolved
         result = state.se.BVV(state.se.any_str(state.regs.eax))
+        real_len = chall_resp_plugin.get_real_len(input_val, pending_info.input_base,
+                                                  result, pending_info.allows_negative)
+
+        if real_len == 0:
+            l.debug("ending hook for %s at %#x with len 0", pending_info.func_name, pending_info.addr)
+            chall_resp_plugin.pop_from_backup()
+            return
+
+        # result constraint
         new_var = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_result", 32)
         constraint = new_var == result
         chall_resp_plugin.replacement_pairs.append((new_var, state.regs.eax))
         state.regs.eax = new_var
 
-        # mark the input
-        input_val = state.mem[pending_info.input_val].string.resolved
+        # finish marking the input
+        input_val = state.memory.load(pending_info.input_val, real_len)
+        l.debug("string len was %d, value was %d", real_len, state.se.any_int(result))
         input_bvs = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_input", input_val.size())
         chall_resp_plugin.str_to_int_pairs.append((input_bvs, new_var))
         chall_resp_plugin.replacement_pairs.append((input_bvs, input_val))
-    else:
+    elif pending_info.get_type() == "IntToStr":
         # result constraint
         result = state.se.BVV(state.se.any_str(state.mem[pending_info.str_dst_addr].string.resolved))
         new_var = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_result",
@@ -160,15 +206,21 @@ def end_info_hook(state):
         input_bvs = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_input", 32)
         chall_resp_plugin.int_to_str_pairs.append((input_bvs, new_var))
         chall_resp_plugin.replacement_pairs.append((input_bvs, input_val))
+        # here we need the constraint that the input was equal to the StrToInt_input
+        state.add_constraints(input_bvs == input_val)
+
+    else:
+        chall_resp_plugin.backup_pending_info = []
+        return
 
     l.debug("ending hook for %s at %#x", pending_info.func_name, pending_info.addr)
-    l.debug("new constraint %s", constraint)
     chall_resp_plugin.vars_we_added.update(new_var.variables)
     chall_resp_plugin.vars_we_added.update(input_bvs.variables)
-    state.add_constraints(input_val == input_bvs)
+    # don't add constraints just add replacement
     state.se._solver.add_replacement(new_var, result, invalidate_cache=False)
     chall_resp_plugin.tracer.preconstraints.append(constraint)
     chall_resp_plugin.tracer.variable_map[list(new_var.variables)[0]] = constraint
+    chall_resp_plugin.pop_from_backup()
 
 
 def exit_hook(state):
@@ -213,15 +265,15 @@ def syscall_hook(state):
             state.memory.store(buf, rand_bytes)
 
 
-
 def constraint_hook(state):
     if not state.has_plugin("chall_resp_info"):
         return
 
     # here we prevent adding constraints if there's a pending thing
     chall_resp_plugin = state.get_plugin("chall_resp_info")
-    if chall_resp_plugin.pending_info is not None:
+    if chall_resp_plugin.pending_info is not None and simuvex.o.REPLACEMENT_SOLVER in state.options:
         state.inspect.added_constraints = []
+
 
 class ChallRespInfo(SimStatePlugin):
     """
@@ -241,6 +293,7 @@ class ChallRespInfo(SimStatePlugin):
         self.ret_addr_to_unhook = None
         self.vars_we_added = set()
         self.replacement_pairs = []
+        self.backup_pending_info = []
 
 
     def __getstate__(self):
@@ -270,6 +323,7 @@ class ChallRespInfo(SimStatePlugin):
         s.ret_addr_to_unhook = self.ret_addr_to_unhook
         s.vars_we_added = set(self.vars_we_added)
         s.replacement_pairs = list(self.replacement_pairs)
+        s.backup_pending_info = list(self.backup_pending_info)
         return s
 
     @staticmethod
@@ -282,6 +336,15 @@ class ChallRespInfo(SimStatePlugin):
             if r is replacement:
                 return o
         return None
+
+    def pop_from_backup(self):
+        # pop from pending info
+        if self.backup_pending_info:
+            ret_addr, pending_info = self.backup_pending_info[0]
+            self.pending_info = pending_info
+            self.ret_addr_to_unhook = ret_addr
+            self.project.hook(ret_addr, end_info_hook, length=0)
+            self.backup_pending_info = self.backup_pending_info[1:]
 
     def get_stdin_indices(self, variable):
         byte_indices = set()
@@ -313,6 +376,108 @@ class ChallRespInfo(SimStatePlugin):
                         byte_indices.update(range(stdout_pos, stdout_pos+num_bytes))
                     stdout_pos += arg.size()/8
         return byte_indices
+
+    def get_real_len(self, input_val, base, result_bv, allows_negative):
+        result = self.state.se.any_int(result_bv)
+        possible_len = self.get_possible_len(input_val, base, allows_negative)
+        if possible_len == 0:
+            return 0
+        input_s = self.state.se.any_str(input_val)
+        try:
+            for i in range(possible_len):
+                if input_s[:i+1] == "-":
+                    continue
+                if int(input_s[:i+1], base) & ((1<<result_bv.size())-1) == result:
+                    return i+1
+        except ValueError:
+            return 0
+
+
+    def get_possible_len(self, input_val, base, allows_negative):
+        state = self.state
+        input_s = state.se.any_str(input_val)
+        nums = "0123456789abcdef"
+        still_whitespace=True
+        for i, c in enumerate(input_s):
+            if still_whitespace and c == "-" and allows_negative:
+                still_whitespace = False
+                continue
+            if c not in string.whitespace:
+                still_whitespace = False
+            if still_whitespace and c in string.whitespace:
+                continue
+            if c.lower() not in nums[:base]:
+                return i
+        return len(input_s)
+
+    def get_same_length_constraints(self):
+        constraints = []
+        for str_var, int_var in self.str_to_int_pairs:
+            int_var_name = list(int_var.variables)[0]
+            base = int(int_var_name.split("_")[1], 10)
+            original_len = str_var.size()/8
+            max_val = base**(original_len)-1
+            min_val = 0
+            constraints.append(claripy.And(int_var >= min_val, int_var <= max_val))
+        return constraints
+
+    @staticmethod
+    def atoi_dumps(state, require_same_length=True):
+        try:
+            if not state.has_plugin("chall_resp_info"):
+                l.warning("no chall resp info, just using posix dumps(0)")
+                return state.posix.dumps(0)
+
+            chall_resp_plugin = state.get_plugin("chall_resp_info")
+
+            vars_to_solve = []
+            pos = state.se.any_int(state.posix.get_file(0).pos)
+            stdin = state.posix.get_file(0).content.load(0, pos)
+            vars_to_solve.append(stdin)
+
+            for s_var, int_var in chall_resp_plugin.str_to_int_pairs:
+                vars_to_solve.append(int_var)
+
+            if require_same_length:
+                extra_constraints = chall_resp_plugin.get_same_length_constraints()
+            else:
+                extra_constraints = []
+
+            solns = state.se._solver.batch_eval(vars_to_solve, 1, extra_constraints=extra_constraints)
+            if len(solns) == 0:
+                if require_same_length:
+                    l.warning("could not satisfy with same length, falling back to different lengths")
+                    return ChallRespInfo.atoi_dumps(state, require_same_length=False)
+                raise simuvex.SimUnsatError("unsat")
+            solns = solns[0]
+
+            # now make the real stdin
+            stdin = state.se.any_str(state.se.BVV(solns[0], pos * 8))
+
+            stdin_replacements = []
+            for soln, (s_var, int_var) in zip(solns[1:], chall_resp_plugin.str_to_int_pairs):
+                int_var_name = list(int_var.variables)[0]
+                indices = chall_resp_plugin.get_stdin_indices(int_var_name)
+                if len(indices) == 0:
+                    continue
+                start = min(indices)
+                length = max(indices) + 1 - start
+                base = int(int_var_name.split("_")[1], 10)
+                str_val = int2base(soln, base)
+                # pad for same length requirement
+                if require_same_length and len(str_val) < length:
+                    str_val = str_val.rjust(length, "0")
+                stdin_replacements.append((start, length, str_val))
+
+            offset = 0
+            for start, length, str_val in sorted(stdin_replacements):
+                stdin = stdin[:start + offset] + str_val + stdin[start + length + offset:]
+                offset = len(str_val) - length
+
+            return stdin
+        except Exception as e:
+            l.error("Exception %s during atoi_dumps!!", e.message)
+            return state.posix.dumps(0)
 
     @staticmethod
     def prep_tracer(tracer, format_infos=None):
@@ -503,11 +668,13 @@ class ZenPlugin(SimStatePlugin):
         return new_cons
 
     def analyze_transmit(self, state, buf):
+        fd = state.se.any_int(state.regs.ebx)
         try:
             state.memory.permissions(state.se.any_int(buf))
         except SimMemoryError:
-            l.warning("detected possible arbitary transmit")
-            self.controlled_transmits.append((state.copy(), buf))
+            l.warning("detected possible arbitary transmit to fd %d", fd)
+            if fd == 0 or fd == 1:
+                self.controlled_transmits.append((state.copy(), buf))
 
     @staticmethod
     def prep_tracer(tracer):

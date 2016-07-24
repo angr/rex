@@ -27,7 +27,8 @@ def test_chall_resp_atoi():
     atoi_addr = cfg_fast.functions["atoi"].addr
     itoa_addr = cfg_fast.functions["itoa"].addr
     f1 = FormatInfoIntToStr(addr=itoa_addr, func_name="itoa", int_arg_num=1, str_dst_num=0, base=10, base_arg=None)
-    f2 = FormatInfoStrToInt(addr=atoi_addr, func_name="atoi", str_arg_num=0, base=10, base_arg=None)
+    f2 = FormatInfoStrToInt(addr=atoi_addr, func_name="atoi", str_arg_num=0, base=10, base_arg=None,
+                            allows_negative=True)
     crash = rex.Crash(bin_path, crash=crash_input, format_infos=[f1, f2])
     exploit_f = crash.exploit()
     for e in exploit_f.register_setters:
