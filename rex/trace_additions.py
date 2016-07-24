@@ -47,6 +47,8 @@ class FormatInfoStrToInt(FormatInfo):
         self.input_val = simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.str_arg_num)
         if self.base_arg is not None:
             self.input_base = state.se.any_int(simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.base_arg))
+            if self.input_base == 0:
+                self.input_base = 16
         else:
             self.input_base = self.base
 
@@ -81,6 +83,8 @@ class FormatInfoIntToStr(FormatInfo):
         self.input_val = simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.int_arg_num)
         if self.base_arg is not None:
             self.input_base = state.se.any_int(simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.base_arg))
+            if self.input_base == 0:
+                self.input_base = 16
         else:
             self.input_base = self.base
         self.str_dst_addr = simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.str_dst_num)

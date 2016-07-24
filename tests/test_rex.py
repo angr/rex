@@ -3,9 +3,11 @@ import nose
 import struct
 import colorguard
 from rex.vulnerability import Vulnerability
+from rex.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt, FormatInfoDontConstrain
 
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
+tests_dir = str(os.path.dirname(os.path.realpath(__file__)))
 
 import logging
 logging.getLogger("rex").setLevel("DEBUG")
@@ -252,6 +254,38 @@ def test_arbitrary_transmit():
     Test our ability to exploit an arbitrary transmit
     """
     _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit")
+
+def test_KPRCA_00057():
+    """
+    This test requires pointing an arbitrary transmit using atoi at the flag
+    """
+    with open(os.path.join(tests_dir, "KPRCA_00057_crash")) as f:
+        crash = f.read()
+
+    # set up hooks
+    format_infos = []
+    format_infos.append(FormatInfoStrToInt(0x8049e90, "based_atoi_8", str_arg_num=0, base=8,
+                       base_arg=None, allows_negative=False))
+    format_infos.append(FormatInfoStrToInt(0x804b3b0, "strtol", str_arg_num=0, base=None,
+                       base_arg=2, allows_negative=False))
+    format_infos.append(FormatInfoStrToInt(0x804b160, "strtol", str_arg_num=0, base=None,
+                       base_arg=2, allows_negative=False))
+    format_infos.append(FormatInfoDontConstrain(0x8049e90, "fdprintf", 1))
+
+    binary = os.path.join(bin_location, "cfe_original/KPRCA_00057/KPRCA_00057")
+    crash = rex.Crash(binary, crash, format_infos=format_infos)
+
+    nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_TRANSMIT))
+
+    flag_leaks = crash.point_to_flag()
+
+    nose.tools.assert_true(len(flag_leaks) >= 1)
+
+    cg = colorguard.ColorGuard(binary, flag_leaks[0])
+    cg.causes_leak()
+    pov = cg.attempt_pov()
+
+    nose.tools.assert_true(_do_pov_test(pov))
 
 def test_arbitrary_transmit_no_crash():
     """
