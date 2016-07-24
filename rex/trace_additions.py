@@ -191,6 +191,8 @@ def end_info_hook(state):
         l.debug("string len was %d, value was %d", real_len, state.se.any_int(result))
         input_bvs = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_input", input_val.size())
         chall_resp_plugin.str_to_int_pairs.append((input_bvs, new_var))
+        if pending_info.allows_negative:
+            chall_resp_plugin.allows_negative_bvs.add(input_bvs.cache_key)
         chall_resp_plugin.replacement_pairs.append((input_bvs, input_val))
     elif pending_info.get_type() == "IntToStr":
         # result constraint
@@ -294,6 +296,7 @@ class ChallRespInfo(SimStatePlugin):
         self.vars_we_added = set()
         self.replacement_pairs = []
         self.backup_pending_info = []
+        self.allows_negative_bvs = set()
 
 
     def __getstate__(self):
@@ -324,6 +327,7 @@ class ChallRespInfo(SimStatePlugin):
         s.vars_we_added = set(self.vars_we_added)
         s.replacement_pairs = list(self.replacement_pairs)
         s.backup_pending_info = list(self.backup_pending_info)
+        s.allows_negative_bvs = set(self.allows_negative_bvs)
         return s
 
     @staticmethod
@@ -392,7 +396,6 @@ class ChallRespInfo(SimStatePlugin):
         except ValueError:
             return 0
 
-
     def get_possible_len(self, input_val, base, allows_negative):
         state = self.state
         input_s = state.se.any_str(input_val)
@@ -416,9 +419,18 @@ class ChallRespInfo(SimStatePlugin):
             int_var_name = list(int_var.variables)[0]
             base = int(int_var_name.split("_")[1], 10)
             original_len = str_var.size()/8
+            abs_max = (1 << int_var.size())-1
+            if str_var.cache_key in self.allows_negative_bvs:
+                abs_max = (1 << (int_var.size()-1))-1
             max_val = base**(original_len)-1
             min_val = 0
-            constraints.append(claripy.And(int_var >= min_val, int_var <= max_val))
+            if str_var.cache_key in self.allows_negative_bvs and original_len > 1:
+                min_val = -(base**(original_len-1)-1)
+
+            max_val = min(max_val, abs_max)
+            min_val = max(min_val, -abs_max)
+
+            constraints.append(claripy.And(int_var.SGE(min_val), int_var <= max_val))
         return constraints
 
     @staticmethod
@@ -448,7 +460,8 @@ class ChallRespInfo(SimStatePlugin):
                 if require_same_length:
                     l.warning("could not satisfy with same length, falling back to different lengths")
                     return ChallRespInfo.atoi_dumps(state, require_same_length=False)
-                raise simuvex.SimUnsatError("unsat")
+                else:
+                    return state.posix.dumps(0)
             solns = solns[0]
 
             # now make the real stdin
@@ -467,8 +480,17 @@ class ChallRespInfo(SimStatePlugin):
                 # pad for same length requirement
                 if require_same_length and len(str_val) < length:
                     str_val = str_val.rjust(length, "0")
+                    if "-" in str_val:
+                        str_val = "-" + str_val.replace("-", "")
                 stdin_replacements.append((start, length, str_val))
 
+            # filter for same start with value 0
+            for i in list(stdin_replacements):
+                if any(ii[0] == i[0] and ii[2] != i[2] for ii in stdin_replacements):
+                    if int(i[2]) == 0:
+                        stdin_replacements.remove(i)
+
+            # now do the replacing
             offset = 0
             for start, length, str_val in sorted(stdin_replacements):
                 stdin = stdin[:start + offset] + str_val + stdin[start + length + offset:]
