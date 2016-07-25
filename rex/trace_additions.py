@@ -399,6 +399,8 @@ class ChallRespInfo(SimStatePlugin):
                     return i+1
         except ValueError:
             return 0
+        l.warning("couldn't get real len returning 0")
+        return 0
 
     def get_possible_len(self, input_val, base, allows_negative):
         state = self.state
