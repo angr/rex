@@ -577,6 +577,8 @@ def zen_hook(state, expr):
                     contained_bytes = zen_plugin.get_flag_bytes(expr)
                     zen_plugin.byte_dict[list(replacement.variables)[0]] = contained_bytes
                     zen_plugin.zen_constraints.append(con)
+                    # saves a ton of memory to do this here rather than later
+                    zen_plugin.zen_constraints.append(state.se.simplify(con))
                 else:
                     # otherwise don't add the constraint, just replace
                     depth = 0
