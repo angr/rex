@@ -308,8 +308,13 @@ def test_reconstraining():
 
     ptfi = cp.point_to_flag()
 
-    nose.tools.assert_equals(len(ptfi), 1)
-    nose.tools.assert_true(ptfi[0].startswith("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x003\x891110000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
+    nose.tools.assert_true(len(ptfi) >= 1)
+
+    cg = colorguard.ColorGuard(binary, ptfi[0])
+    x = cg.attempt_exploit()
+
+    nose.tools.assert_not_equals(x, None)
+    nose.tools.assert_true(_do_pov_test(x))
 
 def test_quick_triage():
     '''
