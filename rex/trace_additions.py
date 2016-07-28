@@ -224,7 +224,8 @@ def end_info_hook(state):
     chall_resp_plugin.vars_we_added.update(input_bvs.variables)
     # don't add constraints just add replacement
     state.se._solver.add_replacement(new_var, result, invalidate_cache=False)
-    chall_resp_plugin.tracer.preconstraints.append(constraint)
+    # dont add this constraint to preconstraints or we lose real constraints
+    # chall_resp_plugin.tracer.preconstraints.append(constraint)
     chall_resp_plugin.tracer.variable_map[list(new_var.variables)[0]] = constraint
     chall_resp_plugin.pop_from_backup()
 

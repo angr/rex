@@ -316,6 +316,24 @@ def test_reconstraining():
     nose.tools.assert_not_equals(x, None)
     nose.tools.assert_true(_do_pov_test(x))
 
+def test_cromu71():
+    crash_input = 'feq\n &\x06\x00\x80\xee\xeen\nf\x00f_E_p\x00\x00\x80\x00q\n3&\x1b\x17/\x12\x1b\x1e]]]]]]]]]]]]]]]]]]]]\n\x1e\x7f\xffC^\n'
+
+    binary = os.path.join(bin_location, "cfe_original/CROMU_00071/CROMU_00071")
+
+    # create format info for atoi
+    format_infos = []
+    format_infos.append(FormatInfoStrToInt(0x804C500, "based_atoi_signed_10", str_arg_num=0, base=10,
+                                           base_arg=None, allows_negative=True))
+
+    crash = rex.Crash(binary, crash_input)
+
+    # let's generate some exploits for it
+    arsenal = crash.exploit()
+
+    # make sure it works
+    nose.tools.assert_true(_do_pov_test(arsenal.best_type1))
+
 def test_quick_triage():
     '''
     Test our ability to triage crashes quickly.
