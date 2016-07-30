@@ -201,6 +201,10 @@ def end_info_hook(state):
     elif pending_info.get_type() == "IntToStr":
         # result constraint
         result = state.se.BVV(state.se.any_str(state.mem[pending_info.str_dst_addr].string.resolved))
+        if result is None or result.size() == 0:
+            l.warning("zero len string")
+            chall_resp_plugin.pop_from_backup()
+            return
         new_var = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_result",
                                result.size())
         chall_resp_plugin.replacement_pairs.append((new_var, state.mem[pending_info.str_dst_addr].string.resolved))
@@ -387,6 +391,10 @@ class ChallRespInfo(SimStatePlugin):
         return byte_indices
 
     def get_real_len(self, input_val, base, result_bv, allows_negative):
+        # handle 0-length bv's and None's
+        if input_val is None or input_val.size() == 0:
+            return 0
+
         result = self.state.se.any_int(result_bv)
         possible_len = self.get_possible_len(input_val, base, allows_negative)
         if possible_len == 0:
