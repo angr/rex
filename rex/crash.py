@@ -5,6 +5,7 @@ l = logging.getLogger("rex.Crash")
 import os
 import angr
 import angrop
+import random
 import tracer
 import hashlib
 import operator
@@ -254,7 +255,6 @@ class Crash(object):
         if not self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT]):
             raise CannotExploit("only arbitrary-reads can be exploited this way")
 
-        new_inputs = [ ]
         violating_actions = [ ]
 
         if self.one_of([Vulnerability.ARBITRARY_READ]):
@@ -268,16 +268,98 @@ class Crash(object):
                 violating_actions.append((st, addr))
 
         for st, va in violating_actions:
-            cp = self._get_state_pointing_to_flag(st, va)
-            self._reconstrain_flag_data(cp)
-            new_inputs.append(ChallRespInfo.atoi_dumps(cp))
+            try:
+                cp = self._get_state_pointing_to_flag(st, va)
+                self._reconstrain_flag_data(cp)
+                yield ChallRespInfo.atoi_dumps(cp)
+            except CannotExploit:
+                l.warning("crash couldn't be pointed at flag skipping")
+                pass
 
-        return new_inputs
+        # look for contiguous flag bytes of length 4 or longer and try to leak only one
+        max_tries = 20
+        num_tries = 0
+        for start, length in self.flag_mem.items():
+            if length < 4:
+                continue
+            data = self.state.memory.load(start, length)
+            four_flag_offset = self._four_flag_bytes_offset(data)
+            if four_flag_offset is not None:
+                leak_addr = start + four_flag_offset
+                l.debug("found flag at addr %#x", leak_addr)
+                for st, va in violating_actions:
+                    if num_tries > max_tries:
+                        l.warning("passed the maximum number of tries")
+                        break
+                    num_tries += 1
+                    try:
+                        cp = self._get_state_pointing_to_addr(st, va, leak_addr)
+                        self._reconstrain_flag_data(cp)
+                        l.debug("pointed successfully")
+                        yield ChallRespInfo.atoi_dumps(cp)
+                        # okay we got one we are done
+                        return
+                    except CannotExploit:
+                        l.warning("crash couldn't be pointed at flag skipping")
+                        pass
+
+    @staticmethod
+    def _four_flag_bytes_offset(ast):
+        """
+        checks if an ast contains 4 contiguous flag bytes
+        if so returns the offset in bytes, otherwise returns None
+        :return: the offset or None
+        """
+        if ast.op != "Concat":
+            return None
+
+        offset = 0
+        flag_start_off = None
+        first_flag_index = None
+
+        for arg in ast.args:
+            # if it's not byte aligned
+            if offset % 8 != 0:
+                offset += arg.size()/8
+                continue
+
+            # check if the arg is a flag byte
+            if arg.op == "BVS" and len(arg.variables) == 1 and list(arg.variables)[0].startswith("cgc-flag-byte-"):
+                # we found a flag byte
+                flag_byte = int(list(arg.variables)[0].split("-")[-1].split("_")[0], 10)
+
+                if flag_start_off is None:
+                    # no start
+                    flag_start_off = offset / 8
+                    first_flag_index = flag_byte
+                elif (offset/8 - flag_start_off) != flag_byte - first_flag_index:
+                    # not contiguous
+                    flag_start_off = offset/8
+                    first_flag_index = flag_byte
+                else:
+                    # contiguous
+                    if flag_byte-first_flag_index == 3:
+                        return flag_start_off
+            else:
+                flag_start_off = None
+                first_flag_index = None
+
+            offset += arg.size()
+
+        return None
 
     @staticmethod
     def _get_state_pointing_to_flag(state, violating_addr):
-        # see if we can point at flag
         cgc_magic_page_addr = 0x4347c000
+
+        # see if we can point randomly inside the flag (prevent people filtering exactly 0x4347c000)
+        rand_addr = random.randint(cgc_magic_page_addr, cgc_magic_page_addr+0x1000-4)
+        if state.se.satisfiable(extra_constraints=(violating_addr == rand_addr,)):
+            cp = state.copy()
+            cp.add_constraints(violating_addr == rand_addr)
+            return cp
+
+        # see if we can point anywhere at flag
         if state.se.satisfiable(extra_constraints=
                                 (violating_addr >= cgc_magic_page_addr,
                                  violating_addr < cgc_magic_page_addr+0x1000-4)):
@@ -288,6 +370,14 @@ class Crash(object):
         else:
             raise CannotExploit("unable to point arbitrary-read at the flag page")
 
+    @staticmethod
+    def _get_state_pointing_to_addr(state, violating_addr, goal_addr):
+        if state.se.satisfiable(extra_constraints=(violating_addr == goal_addr,)):
+            cp = state.copy()
+            cp.add_constraints(violating_addr == goal_addr)
+            return cp
+        else:
+            raise CannotExploit("unable to point arbitrary-read at the flag copy")
 
 
     def _explore_arbitrary_read(self, path_file=None):
@@ -412,6 +502,7 @@ class Crash(object):
         cp.rop = self.rop
         cp.added_actions = list(self.added_actions)
         cp.symbolic_mem = self.symbolic_mem.copy()
+        cp.flag_mem = self.flag_mem.copy()
         cp.crash_types = self.crash_types
         cp._tracer = self._tracer
         cp.violating_action = self.violating_action

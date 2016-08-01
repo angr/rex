@@ -75,7 +75,7 @@ def test_controlled_printf():
 
     nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_READ))
 
-    flag_leaks = crash.point_to_flag()
+    flag_leaks = list(crash.point_to_flag())
 
     nose.tools.assert_true(len(flag_leaks) >= 1)
 
@@ -235,7 +235,7 @@ def _do_arbitrary_transmit_test_for(binary):
     zp = crash.state.get_plugin("zen_plugin")
     nose.tools.assert_true(len(zp.controlled_transmits) == 1)
 
-    flag_leaks = crash.point_to_flag()
+    flag_leaks = list(crash.point_to_flag())
 
     nose.tools.assert_true(len(flag_leaks) >= 1)
 
@@ -277,7 +277,7 @@ def test_KPRCA_00057():
 
     nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_TRANSMIT))
 
-    flag_leaks = crash.point_to_flag()
+    flag_leaks = list(crash.point_to_flag())
 
     nose.tools.assert_true(len(flag_leaks) >= 1)
 
@@ -306,7 +306,7 @@ def test_reconstraining():
     crash = rex.Crash(binary, crash_input)
     cp = crash.copy()
 
-    ptfi = cp.point_to_flag()
+    ptfi = list(cp.point_to_flag())
 
     nose.tools.assert_true(len(ptfi) >= 1)
 
@@ -315,6 +315,14 @@ def test_reconstraining():
 
     nose.tools.assert_not_equals(x, None)
     nose.tools.assert_true(_do_pov_test(x))
+
+    # test point to flag
+    nose.tools.assert_true(len(ptfi) >= 2)
+    cg = colorguard.ColorGuard(binary, ptfi[1])
+    x = cg.attempt_exploit()
+    nose.tools.assert_not_equals(x, None)
+    nose.tools.assert_true(_do_pov_test(x))
+
 
 def test_cromu71():
     crash_input = 'feq\n &\x06\x00\x80\xee\xeen\nf\x00f_E_p\x00\x00\x80\x00q\n3&\x1b\x17/\x12\x1b\x1e]]]]]]]]]]]]]]]]]]]]\n\x1e\x7f\xffC^\n'
