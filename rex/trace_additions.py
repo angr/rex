@@ -9,6 +9,21 @@ l = logging.getLogger("rex.trace_additions")
 l.setLevel("DEBUG")
 
 
+"""
+This file contains objects to track additional information during a trace or
+modify symbolic variables during a trace.
+
+The ChallRespInfo plugin tracks variables in stdin and stdout to enable handling of challenge response
+It handles atoi/int2str in a special manner since path constraints will usually prevent
+their values from being modified
+
+The Zen plugin simplifies expressions created from variables in the flag page (losing some accuracy)
+to avoid situations where they become to complex for z3, but the actual equation doesn't matter much.
+This can happen in challenge response if all of the values in the flag page are multiplied together
+before being printed.
+"""
+
+
 class FormatInfo(object):
     def copy(self):
         raise NotImplementedError
