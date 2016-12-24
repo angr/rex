@@ -2,7 +2,7 @@ import rex
 import nose
 
 import os
-bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
+bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 
 def test_write_what_where_shadowstack():
     """
