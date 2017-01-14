@@ -14,7 +14,7 @@ import subprocess
 
 setup(
       name='rex',
-      version='0.01',
+      version='0.02',
       packages=['rex', 'rex.exploit', 'rex.exploit.cgc', 'rex.exploit.cgc.type1', 'rex.exploit.cgc.type2', 'rex.exploit.cgc.c_templates', 'rex.exploit.techniques', 'rex.exploit.shellcodes'],
       install_requires=[
             'angr',
