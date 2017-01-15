@@ -72,7 +72,7 @@ class Crash(object):
                     l.info("loading rop gadgets from cache '%s'", rop_cache_path)
                     self.rop.load_gadgets(rop_cache_path)
                 else:
-                    self.rop.find_gadgets()
+                    self.rop.find_gadgets(show_progress=False)
                     self.rop.save_gadgets(rop_cache_path)
         else:
             self.rop = None
