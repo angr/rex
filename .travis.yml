@@ -1,7 +1,7 @@
 language: python
 python: 2.7
 sudo: required
-dist: xenial
+dist: trusty
 env:
   - PY=p ANGR_REPO=rex
 install: ( curl https://raw.githubusercontent.com/angr/angr-dev/$TRAVIS_BRANCH/tests/travis-install.sh | grep -v 404 || curl https://raw.githubusercontent.com/angr/angr-dev/master/tests/travis-install.sh ) | bash
