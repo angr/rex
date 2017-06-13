@@ -19,7 +19,6 @@ setup(
       install_requires=[
             'angr',
             'povsim',
-            'simuvex',
             'tracer',
             'angrop',
             'compilerex',

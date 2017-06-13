@@ -1,5 +1,4 @@
 angr
-simuvex
 tracer
 angrop
 compilerex

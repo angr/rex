@@ -12,7 +12,7 @@ import operator
 from .trace_additions import ChallRespInfo, ZenPlugin
 from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
-from simuvex import SimMemoryError, s_options as so
+from angr import sim_options as so
 
 
 class NonCrashingInput(Exception):
@@ -737,7 +737,7 @@ class QuickCrash(object):
                 l.debug("ip appears to be uncontrolled")
                 return pc, Vulnerability.UNCONTROLLED_IP_OVERWRITE
 
-        except SimMemoryError:
+        except angr.SimMemoryError:
             ip_overwritten = True
 
         if ip_overwritten:
@@ -797,7 +797,7 @@ class QuickCrash(object):
                             l.debug("write attempt at a read-only page, assuming uncontrolled")
                             return pc, Vulnerability.UNCONTROLLED_WRITE
 
-                    except SimMemoryError:
+                    except angr.SimMemoryError:
                         pass
 
                 elif a.action == 'read':

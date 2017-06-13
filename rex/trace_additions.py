@@ -1,7 +1,5 @@
-from simuvex import SimStatePlugin
-import simuvex
+import angr
 import claripy
-from simuvex import SimMemoryError
 
 import string
 import logging
@@ -9,6 +7,7 @@ l = logging.getLogger("rex.trace_additions")
 l.setLevel("DEBUG")
 
 
+#pylint:disable=pointless-string-statement
 """
 This file contains objects to track additional information during a trace or
 modify symbolic variables during a trace.
@@ -59,9 +58,9 @@ class FormatInfoStrToInt(FormatInfo):
         return out
 
     def compute(self, state):
-        self.input_val = simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.str_arg_num)
+        self.input_val = angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.str_arg_num)
         if self.base_arg is not None:
-            self.input_base = state.se.any_int(simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.base_arg))
+            self.input_base = state.se.any_int(angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.base_arg))
             if self.input_base == 0:
                 self.input_base = 16
         else:
@@ -95,14 +94,14 @@ class FormatInfoIntToStr(FormatInfo):
         return out
 
     def compute(self, state):
-        self.input_val = simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.int_arg_num)
+        self.input_val = angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.int_arg_num)
         if self.base_arg is not None:
-            self.input_base = state.se.any_int(simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.base_arg))
+            self.input_base = state.se.any_int(angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.base_arg))
             if self.input_base == 0:
                 self.input_base = 16
         else:
             self.input_base = self.base
-        self.str_dst_addr = simuvex.s_cc.SimCCCdecl(state.arch).arg(state, self.str_dst_num)
+        self.str_dst_addr = angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.str_dst_num)
 
     def get_type(self):
         return "IntToStr"
@@ -151,7 +150,7 @@ def generic_info_hook(state):
     format_info = chall_resp_plugin.format_infos[addr].copy()
     if format_info.get_type() == "DontConstrain":
         arg_num = format_info.check_symbolic_arg
-        arg = simuvex.s_cc.SimCCCdecl(state.arch).arg(state, arg_num)
+        arg = angr.calling_conventions.SimCCCdecl(state.arch).arg(state, arg_num)
         if state.mem[arg].string.resolved.symbolic:
             l.warning("symbolic arg not hooking")
             return
@@ -297,16 +296,16 @@ def constraint_hook(state):
 
     # here we prevent adding constraints if there's a pending thing
     chall_resp_plugin = state.get_plugin("chall_resp_info")
-    if chall_resp_plugin.pending_info is not None and simuvex.o.REPLACEMENT_SOLVER in state.options:
+    if chall_resp_plugin.pending_info is not None and angr.options.REPLACEMENT_SOLVER in state.options:
         state.inspect.added_constraints = []
 
 
-class ChallRespInfo(SimStatePlugin):
+class ChallRespInfo(angr.state_plugins.SimStatePlugin):
     """
     This state plugin keeps track of the reads and writes to symbolic addresses
     """
     def __init__(self):
-        SimStatePlugin.__init__(self)
+        angr.state_plugins.SimStatePlugin.__init__(self)
         # for each constraint we check what the max stdin it has and how much stdout we have
         self.stdin_min_stdout_constraints = {}
         self.stdin_min_stdout_reads = {}
@@ -477,7 +476,7 @@ class ChallRespInfo(SimStatePlugin):
             stdin = state.posix.get_file(0).content.load(0, pos)
             vars_to_solve.append(stdin)
 
-            for s_var, int_var in chall_resp_plugin.str_to_int_pairs:
+            for _, int_var in chall_resp_plugin.str_to_int_pairs:
                 vars_to_solve.append(int_var)
 
             if require_same_length:
@@ -538,17 +537,17 @@ class ChallRespInfo(SimStatePlugin):
         state = path.state
         state.inspect.b(
             'exit',
-            simuvex.BP_BEFORE,
+            angr.BP_BEFORE,
             action=exit_hook
         )
         state.inspect.b(
             'syscall',
-            simuvex.BP_AFTER,
+            angr.BP_AFTER,
             action=syscall_hook
         )
         state.inspect.b(
             'constraints',
-            simuvex.BP_BEFORE,
+            angr.BP_BEFORE,
             action=constraint_hook
         )
 
@@ -634,9 +633,9 @@ def zen_register_write(state):
         state.inspect.reg_write_expr = new_expr
 
 
-class ZenPlugin(SimStatePlugin):
+class ZenPlugin(angr.state_plugins.SimStatePlugin):
     def __init__(self, max_depth=13):
-        SimStatePlugin.__init__(self)
+        angr.state_plugins.SimStatePlugin.__init__(self)
         # dict from cache key to asts
         self.replacements = dict()
         # dict from zen vars to the depth
@@ -725,7 +724,7 @@ class ZenPlugin(SimStatePlugin):
         fd = state.se.any_int(state.regs.ebx)
         try:
             state.memory.permissions(state.se.any_int(buf))
-        except SimMemoryError:
+        except angr.SimMemoryError:
             l.warning("detected possible arbitary transmit to fd %d", fd)
             if fd == 0 or fd == 1:
                 self.controlled_transmits.append((state.copy(), buf))
@@ -742,12 +741,12 @@ class ZenPlugin(SimStatePlugin):
         state.register_plugin("zen_plugin", zen_plugin)
         state.inspect.b(
             'reg_write',
-            simuvex.BP_BEFORE,
+            angr.BP_BEFORE,
             action=zen_register_write
         )
         state.inspect.b(
             'mem_write',
-            simuvex.BP_BEFORE,
+            angr.BP_BEFORE,
             action=zen_memory_write
         )
 
