@@ -532,9 +532,9 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
 
     @staticmethod
     def prep_tracer(tracer, format_infos=None):
-        path = tracer.path_group.one_active
+        state = tracer.simgr.one_active
+        project = tracer._p
         format_infos = [] if format_infos is None else format_infos
-        state = path.state
         state.inspect.b(
             'exit',
             angr.BP_BEFORE,
@@ -555,7 +555,7 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
             chall_resp_plugin = state.get_plugin("chall_resp_info")
         else:
             chall_resp_plugin = ChallRespInfo()
-        chall_resp_plugin.project = path._project
+        chall_resp_plugin.project = project
         chall_resp_plugin.tracer = tracer
         for f in format_infos:
             chall_resp_plugin.format_infos[f.addr] = f
@@ -563,7 +563,7 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
         state.register_plugin("chall_resp_info", chall_resp_plugin)
 
         for addr in chall_resp_plugin.format_infos:
-            path._project.hook(addr, generic_info_hook, length=0)
+            project.hook(addr, generic_info_hook, length=0)
 
 
 # THE ZEN HOOK
@@ -731,7 +731,7 @@ class ZenPlugin(angr.state_plugins.SimStatePlugin):
 
     @staticmethod
     def prep_tracer(tracer):
-        state = tracer.path_group.one_active.state
+        state = tracer.simgr.one_active
         if state.has_plugin("zen_plugin"):
             zen_plugin = state.get_plugin("zen_plugin")
         else:

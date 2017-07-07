@@ -113,7 +113,7 @@ class Crash(object):
 
             # if there was no crash we'll have to use the previous path's state
             if crash_state is None:
-                self.state = prev.state
+                self.state = prev
             else:
                 # the state at crash time
                 self.state = crash_state
@@ -264,7 +264,7 @@ class Crash(object):
         zp = self.state.get_plugin('zen_plugin')
         if zp is not None:
             for st, addr in zp.controlled_transmits:
-                self._tracer.remove_preconstraints(self.project.factory.path(st))
+                self._tracer.remove_preconstraints(st)
                 violating_actions.append((st, addr))
 
         for st, va in violating_actions:
@@ -627,7 +627,7 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        for a in list(self.prev.state.log.actions) + list(self.state.log.actions):
+        for a in self.prev.history.recent_actions + self.state.history.recent_actions:
             if a.type == 'mem':
                 if self.state.se.symbolic(a.addr):
                     symbolic_actions.append(a)
@@ -768,11 +768,10 @@ class QuickCrash(object):
         start_state.regs.esp = r.reg_vals['esp']
         start_state.regs.ebp = r.reg_vals['ebp']
 
-        pth = project.factory.path(start_state)
-        next_pth = pth.step(num_inst=1)[0]
+        next_pth = project.factory.successors(start_state, num_inst=1)
 
         posit = None
-        for a in next_pth.actions:
+        for a in next_pth.history.recent_actions:
             if a.type == 'mem':
 
                 target_addr = start_state.se.any_int(a.addr)

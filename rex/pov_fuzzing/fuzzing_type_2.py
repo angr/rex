@@ -115,13 +115,11 @@ class Type2CrashFuzzer(object):
                 self._reg_asts[r] = ast
                 s.registers.store(r, ast)
             s.ip = self.orig_regs["eip"]
-            p = self._p.factory.path(s)
-            p.step(num_inst=1)
-            all_succ = p.successors + p.unconstrained_successors
+            all_succ = self._p.factory.successors(s, num_inst=1).all_successors
             if len(all_succ) == 0:
                 raise CannotExploit("no successors")
             succ = all_succ[0]
-            for a in succ.actions.hardcopy:
+            for a in succ.history.recent_actions:
                 if a.type == "mem" and a.action == "read":
                     dependencies = a.addr.ast.variables
                     self.addr_ast = a.addr.ast
