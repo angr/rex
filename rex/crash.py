@@ -77,7 +77,7 @@ class Crash(object):
         else:
             self.rop = None
 
-        self.os = self.project.loader.main_bin.os
+        self.os = self.project.loader.main_object.os
 
         # determine the aslr of a given os and arch
         if aslr is None:
@@ -98,7 +98,7 @@ class Crash(object):
             # faster place to check for non-crashing inputs
 
             # optimized crash check
-            if self.project.loader.main_bin.os == 'cgc':
+            if self.project.loader.main_object.os == 'cgc':
 
                 if not tracer.Runner(binary, input=self.crash).crash_mode:
                     if not tracer.Runner(binary, input=self.crash, report_bad_args=True).crash_mode:
@@ -396,8 +396,8 @@ class Crash(object):
         largest_regions = filter(lambda x: (min_read <= x) and (x <= max_read), largest_regions)
 
         # populate the rest of the list with addresses from the binary
-        min_addr = self.project.loader.main_bin.get_min_addr()
-        max_addr = self.project.loader.main_bin.get_max_addr()
+        min_addr = self.project.loader.main_object.min_addr
+        max_addr = self.project.loader.main_object.max_addr
         pages = range(min_addr, max_addr, 0x1000)
         pages = filter(lambda x: (min_read <= x) and (x <= max_read), pages)
 
@@ -745,8 +745,8 @@ class QuickCrash(object):
             # this is done by seeing if the most signifigant bytes of
             # pc could be a mapping
             cgc_object = project.loader.all_elf_objects[0]
-            base = cgc_object.get_min_addr() & 0xff000000
-            while base < cgc_object.get_max_addr():
+            base = cgc_object.min_addr & 0xff000000
+            while base < cgc_object.max_addr:
                 if pc & 0xff000000 == base:
                     l.debug("ip appears to only be partially controlled")
                     return pc, Vulnerability.PARTIAL_IP_OVERWRITE
