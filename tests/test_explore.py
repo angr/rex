@@ -23,6 +23,8 @@ def run_all():
 
 if __name__ == "__main__":
     import sys
+    import logging
+    logging.getLogger('rex').setLevel('DEBUG')
     if len(sys.argv) > 1:
         globals()['test_' + sys.argv[1]]()
     else:

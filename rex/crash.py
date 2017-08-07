@@ -105,8 +105,14 @@ class Crash(object):
                         l.warning("input did not cause a crash")
                         raise NonCrashingInput
 
-            self._tracer = tracer.Tracer(binary, input=self.crash, pov_file=self.pov_file, resiliency=False,
-                                         hooks=self.hooks, add_options=add_options, remove_options=remove_options)
+            self._tracer = tracer.Tracer(binary,
+                    input=self.crash,
+                    pov_file=self.pov_file,
+                    resiliency=False,
+                    hooks=self.hooks,
+                    add_options=add_options,
+                    remove_options=remove_options,
+                    keep_predecessors=2)
             ChallRespInfo.prep_tracer(self._tracer, format_infos)
             ZenPlugin.prep_tracer(self._tracer)
             prev, crash_state = self._tracer.run(constrained_addrs)
