@@ -8,25 +8,20 @@ from collections import defaultdict
 from multiprocessing import Pool
 from ..crash import CannotExploit
 
+from angrop import rop_utils
+import claripy
+from cle import CLEError
+from povsim import CGCPovSimulator
+import angr
+import tracer
+import compilerex
+
+import fuzzing_type_2_c_template
+
 l = logging.getLogger("rex.fuzzing_type_1")
 logging.getLogger("cle.elfcore").setLevel("CRITICAL")
 logging.getLogger("tracer.Runner").setLevel("WARNING")
 l.setLevel("DEBUG")
-
-try:
-    from angrop import rop_utils
-    import claripy
-    from cle import CLEError
-    from povsim import CGCPovSimulator
-    import angr
-    import tracer
-    import compilerex
-    USE_ANGR=True
-except ImportError:
-    USE_ANGR=False
-    l.warning("using non-angr version")
-    from .custom_runner import CustomRunner
-import fuzzing_type_2_c_template
 
 
 CGC_GENERAL_REGS = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]

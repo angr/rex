@@ -5,22 +5,17 @@ import itertools
 from collections import defaultdict
 from multiprocessing import Pool
 
+from povsim import CGCPovSimulator
+import angr
+import tracer
+import compilerex
+
+import fuzzing_type_1_c_template
+
 l = logging.getLogger("rex.fuzzing_type_1")
 logging.getLogger("tracer.Runner").setLevel("WARNING")
 logging.getLogger("cle.elfcore").setLevel("CRITICAL")
 l.setLevel("DEBUG")
-
-try:
-    from povsim import CGCPovSimulator
-    import angr
-    import tracer
-    import compilerex
-    USE_ANGR=True
-except ImportError:
-    USE_ANGR=False
-    l.warning("using non-angr version")
-    from .custom_runner import CustomRunner
-import fuzzing_type_1_c_template
 
 
 NUM_CGC_BITS = 20
@@ -59,7 +54,6 @@ class ComplexAnalysisException(CrashFuzzerException):
     pass
 
 
-# TODO consider removing dependence on angr
 # TODO handle timeouts
 # TODO move to it's own project?
 # TODO make this fast bprm->core_dump
@@ -67,10 +61,7 @@ class ComplexAnalysisException(CrashFuzzerException):
 # have qemu write to stderr?
 def _get_reg_vals(binary_input_byte):
     binary, test_input, c = binary_input_byte
-    if USE_ANGR:
-        r = tracer.Runner(binary, input=test_input)
-    else:
-        r = CustomRunner(binary, payload=test_input)
+    r = tracer.Runner(binary, input=test_input)
     if not r.crash_mode:
         return [c, None]
     else:
