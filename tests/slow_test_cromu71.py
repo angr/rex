@@ -5,7 +5,7 @@ import nose
 import logging
 l = logging.getLogger("rex").setLevel("DEBUG")
 
-bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
+bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 test_data_location = str(os.path.dirname(os.path.realpath(__file__)))
 
 def _do_pov_test(pov, enable_randomness=True):
@@ -20,7 +20,7 @@ def test_cromu_00071():
     Test exploitation of CROMU_00071
     '''
 
-    crash = rex.Crash(os.path.join(bin_location, "cgc_trials/CROMU_00071"), "0c0c492a53acacacacacacacacacacacacac000100800a0b690e0aef6503697d660a0059e20afc0a0a332f7d66660a0059e20afc0a0a332f7fffffff16fb1616162516161616161616166a7dffffff7b0e0a0a6603697d660a0059e21c".decode('hex'))
+    crash = rex.Crash(os.path.join(bin_location, "tests/cgc/CROMU_00071"), "0c0c492a53acacacacacacacacacacacacac000100800a0b690e0aef6503697d660a0059e20afc0a0a332f7d66660a0059e20afc0a0a332f7fffffff16fb1616162516161616161616166a7dffffff7b0e0a0a6603697d660a0059e21c".decode('hex'))
 
     arsenal = crash.exploit()
 

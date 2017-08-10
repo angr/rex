@@ -2,7 +2,7 @@ from rex import pov_fuzzing
 import os
 import colorguard
 import nose
-bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries-private'))
+bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 
 import logging
 logging.getLogger("rex").setLevel("DEBUG")
