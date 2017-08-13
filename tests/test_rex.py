@@ -100,10 +100,10 @@ def test_shellcode_placement():
     exploit = arsenal.register_setters[0]
 
     # make sure the shellcode was placed into the executable heap page
-    heap_top = crash.state.se.any_int(crash.state.cgc.allocation_base)
+    heap_top = crash.state.se.eval(crash.state.cgc.allocation_base)
     nose.tools.assert_equal(struct.unpack("<I", exploit._raw_payload[-4:])[0] & 0xfffff000, heap_top)
 
-    exec_regions = filter(lambda a: crash.state.se.any_int(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem)
+    exec_regions = filter(lambda a: crash.state.se.eval(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem)
 
     # should just be two executable regions
     nose.tools.assert_equal(len(exec_regions), 2)

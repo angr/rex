@@ -780,7 +780,7 @@ class QuickCrash(object):
         for a in next_pth.history.recent_actions:
             if a.type == 'mem':
 
-                target_addr = start_state.se.any_int(a.addr)
+                target_addr = start_state.se.eval(a.addr)
                 if target_addr < 0x1000:
                     l.debug("attempt to write or read to address of NULL")
                     return pc, Vulnerability.NULL_DEREFERENCE

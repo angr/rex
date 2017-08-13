@@ -60,7 +60,7 @@ class FormatInfoStrToInt(FormatInfo):
     def compute(self, state):
         self.input_val = angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.str_arg_num)
         if self.base_arg is not None:
-            self.input_base = state.se.any_int(angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.base_arg))
+            self.input_base = state.se.eval(angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.base_arg))
             if self.input_base == 0:
                 self.input_base = 16
         else:
@@ -96,7 +96,7 @@ class FormatInfoIntToStr(FormatInfo):
     def compute(self, state):
         self.input_val = angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.int_arg_num)
         if self.base_arg is not None:
-            self.input_base = state.se.any_int(angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.base_arg))
+            self.input_base = state.se.eval(angr.calling_conventions.SimCCCdecl(state.arch).arg(state, self.base_arg))
             if self.input_base == 0:
                 self.input_base = 16
         else:
@@ -144,7 +144,7 @@ def int2base(x, base):
 
 
 def generic_info_hook(state):
-    addr = state.se.any_int(state.regs.ip)
+    addr = state.se.eval(state.regs.ip)
     chall_resp_plugin = state.get_plugin("chall_resp_info")
 
     format_info = chall_resp_plugin.format_infos[addr].copy()
@@ -165,7 +165,7 @@ def generic_info_hook(state):
         chall_resp_plugin.pending_info = None
 
     # hook the return address
-    ret_addr = state.se.any_int(state.memory.load(state.regs.sp, 4, endness="Iend_LE"))
+    ret_addr = state.se.eval(state.memory.load(state.regs.sp, 4, endness="Iend_LE"))
     chall_resp_plugin.ret_addr_to_unhook = ret_addr
     chall_resp_plugin.project.hook(ret_addr, end_info_hook, length=0)
 
@@ -189,7 +189,7 @@ def end_info_hook(state):
     if pending_info.get_type() == "StrToInt":
         # mark the input
         input_val = state.mem[pending_info.input_val].string.resolved
-        result = state.se.BVV(state.se.any_str(state.regs.eax))
+        result = state.se.BVV(state.se.eval(state.regs.eax, cast_to=str))
         real_len = chall_resp_plugin.get_real_len(input_val, pending_info.input_base,
                                                   result, pending_info.allows_negative)
 
@@ -206,7 +206,7 @@ def end_info_hook(state):
 
         # finish marking the input
         input_val = state.memory.load(pending_info.input_val, real_len)
-        l.debug("string len was %d, value was %d", real_len, state.se.any_int(result))
+        l.debug("string len was %d, value was %d", real_len, state.se.eval(result))
         input_bvs = state.se.BVS(pending_info.get_type() + "_" + str(pending_info.input_base) + "_input", input_val.size())
         chall_resp_plugin.str_to_int_pairs.append((input_bvs, new_var))
         if pending_info.allows_negative:
@@ -214,7 +214,7 @@ def end_info_hook(state):
         chall_resp_plugin.replacement_pairs.append((input_bvs, input_val))
     elif pending_info.get_type() == "IntToStr":
         # result constraint
-        result = state.se.BVV(state.se.any_str(state.mem[pending_info.str_dst_addr].string.resolved))
+        result = state.se.BVV(state.se.eval(state.mem[pending_info.str_dst_addr].string.resolved, cast_to=str))
         if result is None or result.size() == 0:
             l.warning("zero len string")
             chall_resp_plugin.pop_from_backup()
@@ -257,7 +257,7 @@ def exit_hook(state):
     # track the amount of stdout we had when a constraint was first added to a byte of stdin
     chall_resp_plugin = state.get_plugin("chall_resp_info")
     stdin_min_stdout_constraints = chall_resp_plugin.stdin_min_stdout_constraints
-    stdout_pos = state.se.any_int(state.posix.get_file(1).pos)
+    stdout_pos = state.se.eval(state.posix.get_file(1).pos)
     for v in guard.variables:
         if v.startswith("file_/dev/stdin"):
             byte_num = ChallRespInfo.get_byte(v)
@@ -273,16 +273,16 @@ def syscall_hook(state):
     if syscall_name == "receive":
         # track the amount of stdout we had when we first read the byte
         stdin_min_stdout_reads = state.get_plugin("chall_resp_info").stdin_min_stdout_reads
-        stdout_pos = state.se.any_int(state.posix.get_file(1).pos)
-        stdin_pos = state.se.any_int(state.posix.get_file(0).pos)
+        stdout_pos = state.se.eval(state.posix.get_file(1).pos)
+        stdin_pos = state.se.eval(state.posix.get_file(0).pos)
         for i in range(0, stdin_pos):
             if i not in stdin_min_stdout_reads:
                 stdin_min_stdout_reads[i] = stdout_pos
 
     # here we make random preconstrained instead of concrete A's
     if syscall_name == "random":
-        num_bytes = state.se.any_int(state.regs.ecx)
-        buf = state.se.any_int(state.regs.ebx)
+        num_bytes = state.se.eval(state.regs.ecx)
+        buf = state.se.eval(state.regs.ebx)
         if num_bytes != 0:
             rand_bytes = state.se.BVS("random", num_bytes*8)
             concrete_val = state.se.BVV("A"*num_bytes)
@@ -388,7 +388,7 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
 
     def get_stdout_indices(self, variable):
         file_1 = self.state.posix.get_file(1)
-        stdout_size = self.state.se.any_int(file_1.pos)
+        stdout_size = self.state.se.eval(file_1.pos)
         stdout = file_1.content.load(0, stdout_size)
         byte_indices = set()
         for int_val, str_val in self.int_to_str_pairs:
@@ -409,11 +409,11 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
         if input_val is None or input_val.size() == 0:
             return 0
 
-        result = self.state.se.any_int(result_bv)
+        result = self.state.se.eval(result_bv)
         possible_len = self.get_possible_len(input_val, base, allows_negative)
         if possible_len == 0:
             return 0
-        input_s = self.state.se.any_str(input_val)
+        input_s = self.state.se.eval(input_val, cast_to=str)
         try:
             for i in range(possible_len):
                 if input_s[:i+1] == "-":
@@ -427,7 +427,7 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
 
     def get_possible_len(self, input_val, base, allows_negative):
         state = self.state
-        input_s = state.se.any_str(input_val)
+        input_s = state.se.eval(input_val, cast_to=str)
         nums = "0123456789abcdef"
         still_whitespace=True
         for i, c in enumerate(input_s):
@@ -472,7 +472,7 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
             chall_resp_plugin = state.get_plugin("chall_resp_info")
 
             vars_to_solve = []
-            pos = state.se.any_int(state.posix.get_file(0).pos)
+            pos = state.se.eval(state.posix.get_file(0).pos)
             stdin = state.posix.get_file(0).content.load(0, pos)
             vars_to_solve.append(stdin)
 
@@ -494,7 +494,7 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
             solns = solns[0]
 
             # now make the real stdin
-            stdin = state.se.any_str(state.se.BVV(solns[0], pos * 8))
+            stdin = state.se.eval(state.se.BVV(solns[0], pos * 8), cast_to=str)
 
             stdin_replacements = []
             for soln, (s_var, int_var) in zip(solns[1:], chall_resp_plugin.str_to_int_pairs):
@@ -581,7 +581,7 @@ def zen_hook(state, expr):
 
             if expr.cache_key in zen_plugin.replacements:
                 # we already have the replacement
-                concrete_val = state.se.any_int(expr)
+                concrete_val = state.se.eval(expr)
                 replacement = zen_plugin.replacements[expr.cache_key]
                 state.se._solver.add_replacement(replacement, concrete_val, invalidate_cache=False)
                 zen_plugin.tracer.preconstraints.append(replacement == concrete_val)
@@ -589,7 +589,7 @@ def zen_hook(state, expr):
             else:
                 # we need to make a new replacement
                 replacement = claripy.BVS("cgc-flag-zen", expr.size())
-                concrete_val = state.se.any_int(expr)
+                concrete_val = state.se.eval(expr)
                 state.se._solver.add_replacement(replacement, concrete_val, invalidate_cache=False)
 
                 # if the depth is less than the max add the constraint and get which bytes it contains
@@ -721,9 +721,9 @@ class ZenPlugin(angr.state_plugins.SimStatePlugin):
         return new_cons
 
     def analyze_transmit(self, state, buf):
-        fd = state.se.any_int(state.regs.ebx)
+        fd = state.se.eval(state.regs.ebx)
         try:
-            state.memory.permissions(state.se.any_int(buf))
+            state.memory.permissions(state.se.eval(buf))
         except angr.SimMemoryError:
             l.warning("detected possible arbitary transmit to fd %d", fd)
             if fd == 0 or fd == 1:
