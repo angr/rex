@@ -633,13 +633,14 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        for a in self.prev.history.recent_actions + self.state.history.recent_actions:
+        for a in list(self.prev.history.actions) + list(self.state.history.actions):
             if a.type == 'mem':
                 if self.state.se.symbolic(a.addr):
                     symbolic_actions.append(a)
 
         # TODO: pick the crashing action based off the crashing instruction address,
         # crash fixup attempts will break on this
+        import ipdb; ipdb.set_trace()
         for sym_action in symbolic_actions:
             if sym_action.action == "write":
                 if self.state.se.symbolic(sym_action.data):
@@ -774,10 +775,10 @@ class QuickCrash(object):
         start_state.regs.esp = r.reg_vals['esp']
         start_state.regs.ebp = r.reg_vals['ebp']
 
-        next_pth = project.factory.successors(start_state, num_inst=1)
+        next_pth = project.factory.successors(start_state, num_inst=1).successors[0]
 
         posit = None
-        for a in next_pth.history.recent_actions:
+        for a in next_pth.history.actions:
             if a.type == 'mem':
 
                 target_addr = start_state.se.eval(a.addr)
