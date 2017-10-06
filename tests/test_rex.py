@@ -65,7 +65,7 @@ def test_legit_00003():
     for leaker in arsenal.leakers:
         nose.tools.assert_true(_do_pov_test(leaker))
 
-def test_controlled_printf():#L90
+def break_controlled_printf():#L90
     '''
     Test ability to turn controlled format string into Type 2 POV.
     '''
@@ -132,7 +132,7 @@ def test_boolector_solving():
     for leaker in arsenal.leakers:
         nose.tools.assert_true(_do_pov_test(leaker))
 
-def test_cpp_vptr_smash():#L165
+def break_cpp_vptr_smash():#L165
     '''
     Test detection of 'arbitrary-read' vulnerability type, exploration of the crash, and exploitation post-exploration
     '''
@@ -257,7 +257,7 @@ def test_arbitrary_transmit():
     """
     _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit")
 
-def test_KPRCA_00057(): # L284
+def break_KPRCA_00057(): # L284
     """
     This test requires pointing an arbitrary transmit using atoi at the flag
     """
@@ -295,7 +295,7 @@ def test_arbitrary_transmit_no_crash():
     """
     _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit_no_crash")
 
-def test_reconstraining():#L309 -> crash.py L262
+def break_reconstraining():
     """
     Test our ability to reconstrain
     """
