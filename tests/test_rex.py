@@ -80,7 +80,6 @@ def break_controlled_printf():#L90
 
     nose.tools.assert_true(len(flag_leaks) >= 1)
 
-    print flag_leaks
     cg = colorguard.ColorGuard(binary, flag_leaks[0])
 
     nose.tools.assert_true(cg.causes_leak())
@@ -295,7 +294,7 @@ def test_arbitrary_transmit_no_crash():
     """
     _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit_no_crash")
 
-def break_reconstraining():
+def test_reconstraining():
     """
     Test our ability to reconstrain
     """

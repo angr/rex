@@ -633,7 +633,11 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        for a in reversed(self.state.history.actions):
+        if self._tracer is not None and self._tracer.about_to_crash is not None:
+            recent_actions = reversed(self._tracer.about_to_crash.history.recent_actions)
+        else:
+            recent_actions = reversed(self.state.history.actions)
+        for a in recent_actions:
             if a.type == 'mem':
                 if self.state.se.symbolic(a.addr):
                     symbolic_actions.append(a)
@@ -778,7 +782,7 @@ class QuickCrash(object):
         next_pth = project.factory.successors(start_state, num_inst=1).successors[0]
 
         posit = None
-        for a in next_pth.history.actions:
+        for a in next_pth.history.recent_actions:
             if a.type == 'mem':
 
                 target_addr = start_state.se.eval(a.addr)
