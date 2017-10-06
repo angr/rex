@@ -93,7 +93,7 @@ class Crash(object):
             remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
                               so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES}
             add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
-                           so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES}
+                           so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS}
 
             # faster place to check for non-crashing inputs
 
@@ -633,14 +633,14 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        for a in list(self.prev.history.actions) + list(self.state.history.actions):
+        for a in reversed(self.state.history.actions):
             if a.type == 'mem':
                 if self.state.se.symbolic(a.addr):
                     symbolic_actions.append(a)
 
         # TODO: pick the crashing action based off the crashing instruction address,
         # crash fixup attempts will break on this
-        import ipdb; ipdb.set_trace()
+       #import ipdb; ipdb.set_trace()
         for sym_action in symbolic_actions:
             if sym_action.action == "write":
                 if self.state.se.symbolic(sym_action.data):
@@ -732,7 +732,7 @@ class QuickCrash(object):
 
         l.debug("checking if ip register points to executable memory")
 
-        start_state = project.factory.entry_state(addr=pc)
+        start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS})
 
         # was ip mapped?
         ip_overwritten = False
