@@ -4,7 +4,6 @@ l = logging.getLogger("rex.Crash")
 
 import os
 import angr
-import angrop
 import random
 import tracer
 import hashlib
