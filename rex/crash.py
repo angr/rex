@@ -100,8 +100,8 @@ class Crash(object):
             # optimized crash check
             if self.project.loader.main_object.os == 'cgc':
 
-                if not tracer.Runner(binary, input=self.crash).crash_mode:
-                    if not tracer.Runner(binary, input=self.crash, report_bad_args=True).crash_mode:
+                if not tracer.QEMURunner(binary, input=self.crash).crash_mode:
+                    if not tracer.QEMURunner(binary, input=self.crash, report_bad_args=True).crash_mode:
                         l.warning("input did not cause a crash")
                         raise NonCrashingInput
 
@@ -688,14 +688,14 @@ class QuickCrash(object):
         l.debug("quick triaging crash against '%s'", binary)
 
         arbitrary_syscall_arg = False
-        r = tracer.Runner(binary, crash, record_trace=True, use_tiny_core=True)
+        r = tracer.QEMURunner(binary, crash, record_trace=True, use_tiny_core=True, record_core=True)
 
         self.bb_count = len(r.trace)
 
         if not r.crash_mode:
 
             # try again to catch bad args
-            r = tracer.Runner(binary, crash, report_bad_args=True)
+            r = tracer.QEMURunner(binary, crash, report_bad_args=True, record_core=True)
             arbitrary_syscall_arg = True
             if not r.crash_mode:
                 raise NonCrashingInput("input did not cause a crash")
@@ -704,7 +704,6 @@ class QuickCrash(object):
 
         if r.os != "cgc":
             raise ValueError("QuickCrash is only available for CGC binaries")
-
 
         if r.is_multicb:
             project = angr.Project(binary[r.crashed_binary])

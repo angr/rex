@@ -20,7 +20,7 @@ import fuzzing_type_2_c_template
 
 l = logging.getLogger("rex.fuzzing_type_1")
 logging.getLogger("cle.elfcore").setLevel("CRITICAL")
-logging.getLogger("tracer.Runner").setLevel("WARNING")
+logging.getLogger("tracer.qemu_runner").setLevel("DEBUG")
 l.setLevel("DEBUG")
 
 
@@ -69,7 +69,7 @@ class ComplexAnalysisException(CrashFuzzerException):
 # have qemu write to stderr?
 def _get_reg_vals(binary_input_byte):
     binary, test_input, c = binary_input_byte
-    r = tracer.Runner(binary, input=test_input)
+    r = tracer.QEMURunner(binary, input=test_input)
     if not r.crash_mode:
         return [c, None]
     else:
@@ -92,7 +92,7 @@ class Type2CrashFuzzer(object):
         self.crash = crash
 
         # verify it actually crashes the binary
-        r = tracer.Runner(self.binary, input=self.crash, record_stdout=True)
+        r = tracer.QEMURunner(self.binary, input=self.crash, record_stdout=True, record_core=True)
         if not r.crash_mode:
             raise CrashFuzzerException("input did not crash the binary")
 
@@ -604,7 +604,7 @@ class Type2CrashFuzzer(object):
             for index, b in choices:
                 new_input = self._replace_indices(new_input, b, [index])
 
-            r = tracer.Runner(self.binary, input=new_input, record_stdout=True, record_magic=True)
+            r = tracer.QEMURunner(self.binary, input=new_input, record_stdout=True, record_magic=True)
             new_stdout = r.stdout
             if len(new_stdout) > len(self.orig_stdout):
                 # okay we have a leak
