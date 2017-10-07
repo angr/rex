@@ -13,7 +13,7 @@ import compilerex
 import fuzzing_type_1_c_template
 
 l = logging.getLogger("rex.fuzzing_type_1")
-logging.getLogger("tracer.Runner").setLevel("WARNING")
+logging.getLogger("tracer.qemu_runner").setLevel("WARNING")
 logging.getLogger("cle.elfcore").setLevel("CRITICAL")
 l.setLevel("DEBUG")
 
@@ -61,7 +61,7 @@ class ComplexAnalysisException(CrashFuzzerException):
 # have qemu write to stderr?
 def _get_reg_vals(binary_input_byte):
     binary, test_input, c = binary_input_byte
-    r = tracer.Runner(binary, input=test_input)
+    r = tracer.QEMURunner(binary, input=test_input, record_core=True)
     if not r.crash_mode:
         return [c, None]
     else:
@@ -84,7 +84,7 @@ class Type1CrashFuzzer(object):
         self.crash = crash
 
         # verify it actually crashes the binary
-        r = tracer.Runner(self.binary, input=self.crash)
+        r = tracer.QEMURunner(self.binary, input=self.crash, record_core=True)
         if not r.crash_mode:
             raise CrashFuzzerException("input did not crash the binary")
 
