@@ -4,6 +4,10 @@ import nose
 
 import logging
 l = logging.getLogger("rex").setLevel("DEBUG")
+logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
+logging.getLogger("angr.simos").setLevel("DEBUG")
+logging.getLogger("angr.exploration_techniques.tracer").setLevel("DEBUG")
+logging.getLogger("angr.exploration_techniques.crash_monitor").setLevel("DEBUG")
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 test_data_location = str(os.path.dirname(os.path.realpath(__file__)))

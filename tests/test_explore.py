@@ -25,6 +25,10 @@ if __name__ == "__main__":
     import sys
     import logging
     logging.getLogger('rex').setLevel('DEBUG')
+    logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
+    logging.getLogger("angr.simos").setLevel("DEBUG")
+    logging.getLogger("angr.exploration_techniques.tracer").setLevel("DEBUG")
+    logging.getLogger("angr.exploration_techniques.crash_monitor").setLevel("DEBUG")
     if len(sys.argv) > 1:
         globals()['test_' + sys.argv[1]]()
     else:
