@@ -10,9 +10,12 @@ bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 tests_dir = str(os.path.dirname(os.path.realpath(__file__)))
 
 import logging
-logging.getLogger("tracer.Tracer").setLevel("DEBUG")
 logging.getLogger("rex").setLevel("DEBUG")
 logging.getLogger("povsim").setLevel("DEBUG")
+logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
+logging.getLogger("angr.simos").setLevel("DEBUG")
+logging.getLogger("angr.exploration_techniques.tracer").setLevel("DEBUG")
+logging.getLogger("angr.exploration_techniques.crash_monitor").setLevel("DEBUG")
 
 def _do_pov_test(pov, enable_randomness=True):
     ''' Test a POV '''

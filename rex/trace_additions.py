@@ -244,7 +244,7 @@ def end_info_hook(state):
     state.se._solver.add_replacement(new_var, result, invalidate_cache=False)
     # dont add this constraint to preconstraints or we lose real constraints
     # chall_resp_plugin.tracer.preconstraints.append(constraint)
-    chall_resp_plugin.tracer.variable_map[list(new_var.variables)[0]] = constraint
+    chall_resp_plugin.state.preconstrainer.variable_map[list(new_var.variables)[0]] = constraint
     chall_resp_plugin.pop_from_backup()
 
 
@@ -312,7 +312,6 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
         self.format_infos = dict()
         self.project = None
         self.pending_info = None
-        self.tracer = None
         self.str_to_int_pairs = []
         self.int_to_str_pairs = []
         self.ret_addr_to_unhook = None
@@ -325,7 +324,6 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
     def __getstate__(self):
         d = dict(self.__dict__)
         del d["project"]
-        del d["tracer"]
         del d["state"]
 
         return d
@@ -333,7 +331,6 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
     def __setstate__(self, d):
         self.__dict__.update(d)
         self.project = None
-        self.tracer = None
         self.state = None
 
     def copy(self):
@@ -343,7 +340,6 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
         s.format_infos = dict(self.format_infos)
         s.project = self.project
         s.pending_info = self.pending_info
-        s.tracer = self.tracer
         s.str_to_int_pairs = list(self.str_to_int_pairs)
         s.int_to_str_pairs = list(self.int_to_str_pairs)
         s.ret_addr_to_unhook = self.ret_addr_to_unhook
@@ -531,9 +527,8 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
             return state.posix.dumps(0)
 
     @staticmethod
-    def prep_tracer(tracer, format_infos=None):
-        state = tracer.simgr.one_active
-        project = tracer._p
+    def prep_tracer(state, format_infos=None):
+        project = state.project
         format_infos = [] if format_infos is None else format_infos
         state.inspect.b(
             'exit',
@@ -556,7 +551,6 @@ class ChallRespInfo(angr.state_plugins.SimStatePlugin):
         else:
             chall_resp_plugin = ChallRespInfo()
         chall_resp_plugin.project = project
-        chall_resp_plugin.tracer = tracer
         for f in format_infos:
             chall_resp_plugin.format_infos[f.addr] = f
 
@@ -584,7 +578,7 @@ def zen_hook(state, expr):
                 concrete_val = state.se.eval(expr)
                 replacement = zen_plugin.replacements[expr.cache_key]
                 state.se._solver.add_replacement(replacement, concrete_val, invalidate_cache=False)
-                zen_plugin.tracer.preconstraints.append(replacement == concrete_val)
+                zen_plugin.state.preconstrainer.preconstraints.append(replacement == concrete_val)
                 zen_plugin.preconstraints.append(replacement == concrete_val)
             else:
                 # we need to make a new replacement
@@ -611,7 +605,7 @@ def zen_hook(state, expr):
                 var = list(replacement.variables)[0]
                 zen_plugin.depths[var] = depth
                 constraint = replacement == concrete_val
-                zen_plugin.tracer.preconstraints.append(constraint)
+                zen_plugin.state.preconstrainer.preconstraints.append(constraint)
                 zen_plugin.preconstraints.append(replacement == concrete_val)
 
                 zen_plugin.replacements[expr.cache_key] = replacement
@@ -642,8 +636,6 @@ class ZenPlugin(angr.state_plugins.SimStatePlugin):
         self.depths = dict()
         # dict from zen vars to the bytes contained
         self.byte_dict = dict()
-        # the tracer object (need to add replacements here)
-        self.tracer = None
         # the max depth an object can have before it is replaced with a zen object with no constraint
         self.max_depth = max_depth
         # the zen replacement constraints (the ones that don't preconstrain input)
@@ -656,14 +648,12 @@ class ZenPlugin(angr.state_plugins.SimStatePlugin):
 
     def __getstate__(self):
         d = dict(self.__dict__)
-        del d["tracer"]
         del d["state"]
 
         return d
 
     def __setstate__(self, d):
         self.__dict__.update(d)
-        self.tracer = None
         self.state = None
 
     @staticmethod
@@ -692,7 +682,6 @@ class ZenPlugin(angr.state_plugins.SimStatePlugin):
         z.depths = self.depths
         # explicitly don't copy
         z.byte_dict = self.byte_dict
-        z.tracer = self.tracer
         z.max_depth = self.max_depth
         z.zen_constraints = self.zen_constraints
         z.preconstraints = self.preconstraints
@@ -730,13 +719,11 @@ class ZenPlugin(angr.state_plugins.SimStatePlugin):
                 self.controlled_transmits.append((state.copy(), buf))
 
     @staticmethod
-    def prep_tracer(tracer):
-        state = tracer.simgr.one_active
+    def prep_tracer(state):
         if state.has_plugin("zen_plugin"):
             zen_plugin = state.get_plugin("zen_plugin")
         else:
             zen_plugin = ZenPlugin()
-        zen_plugin.tracer = tracer
 
         state.register_plugin("zen_plugin", zen_plugin)
         state.inspect.b(
@@ -752,8 +739,8 @@ class ZenPlugin(angr.state_plugins.SimStatePlugin):
 
         # setup the byte dict
         byte_dict = zen_plugin.byte_dict
-        for i, b in enumerate(tracer.cgc_flag_bytes):
+        for i, b in enumerate(state.cgc.flag_bytes):
             var = list(b.variables)[0]
             byte_dict[var] = {i}
 
-        tracer.preconstraints.extend(zen_plugin.preconstraints)
+        state.preconstrainer.preconstraints.extend(zen_plugin.preconstraints)

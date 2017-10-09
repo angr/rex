@@ -44,7 +44,6 @@ class Crash(object):
 
         self.binary = binary
         self.crash  = crash
-        self.pov_file = pov_file
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.hooks = hooks
         self.explore_steps = explore_steps
@@ -52,7 +51,7 @@ class Crash(object):
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
-        self.project = angr.Project(binary)
+        self.project = angr.misc.tracer.make_tracer_project(binary=binary, hooks=self.hooks)
 
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
         # hash binary contents for rop cache name
@@ -104,38 +103,65 @@ class Crash(object):
                         l.warning("input did not cause a crash")
                         raise NonCrashingInput
 
-            self._tracer = tracer.Tracer(binary,
-                    input=self.crash,
-                    pov_file=self.pov_file,
-                    resiliency=False,
-                    hooks=self.hooks,
-                    add_options=add_options,
-                    remove_options=remove_options,
-                    keep_predecessors=2)
-            ChallRespInfo.prep_tracer(self._tracer, format_infos)
-            ZenPlugin.prep_tracer(self._tracer)
-            prev, crash_state = self._tracer.run(constrained_addrs)
+            if pov_file is None and self.crash is None:
+                raise ValueError("must specify crash or pov_file")
+
+            if pov_file is not None and self.crash is not None:
+                raise ValueError("cannot specify both a pov_file and an crash")
+
+            if pov_file is not None:
+                input = TracerPoV(pov_file)
+            else:
+                input = self.crash
+
+            r = tracer.QEMURunner(binary=binary, input=input)
+
+            s = self.project.factory.tracer_state(input_content=input,
+                                                  magic_content=r.magic,
+                                                  add_options=add_options,
+                                                  remove_options=remove_options,
+                                                  constrained_addrs=self.constrained_addrs)
+
+            ChallRespInfo.prep_tracer(s, format_infos)
+            ZenPlugin.prep_tracer(s)
+
+            simgr = self.project.factory.simgr(s,
+                                               save_unsat=True,
+                                               hierarchy=False,
+                                               save_unconstrained=r.crash_mode)
+
+            self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2)
+            self._c = angr.exploration_techniques.CrashMonitor(trace=r.trace,
+                                                               crash_mode=r.crash_mode,
+                                                               crash_addr=r.crash_addr)
+            simgr.use_technique(self._c)
+            simgr.use_technique(self._t)
+            simgr.use_technique(angr.exploration_techniques.Oppologist())
+
+            simgr.run()
 
             # if there was no crash we'll have to use the previous path's state
-            if crash_state is None:
-                self.state = prev
-            else:
+            if 'crashed' in simgr.stashes:
                 # the state at crash time
-                self.state = crash_state
+                self.state = simgr.crashed[0]
+                # a path leading up to the crashing basic block
+                self.prev = self._t.predecessors[-1]
+            else:
+                self.state = simgr.traced[0]
+                self.prev = self.state
 
             zp = self.state.get_plugin('zen_plugin')
-            if crash_state is None and (zp is not None and len(zp.controlled_transmits) == 0):
+            if 'crashed' not in simgr.stashes and (zp is not None and len(zp.controlled_transmits) == 0):
                 l.warning("input did not cause a crash")
                 raise NonCrashingInput
 
             l.debug("done tracing input")
-            # a path leading up to the crashing basic block
-            self.prev = prev
 
         else:
             self.state = crash_state
             self.prev = prev_path
-            self._tracer = None
+            self._t = None
+            self._c = None
 
         # list of actions added during exploitation, probably better object for this attribute to belong to
         self.added_actions = [ ]
@@ -269,7 +295,7 @@ class Crash(object):
         zp = self.state.get_plugin('zen_plugin')
         if zp is not None:
             for st, addr in zp.controlled_transmits:
-                self._tracer.remove_preconstraints(st)
+                st.preconstrainer.remove_preconstraints()
                 violating_actions.append((st, addr))
 
         for st, va in violating_actions:
@@ -509,7 +535,8 @@ class Crash(object):
         cp.symbolic_mem = self.symbolic_mem.copy()
         cp.flag_mem = self.flag_mem.copy()
         cp.crash_types = self.crash_types
-        cp._tracer = self._tracer
+        cp._t = self._t
+        cp._c = self._c
         cp.violating_action = self.violating_action
         cp.explore_steps = self.explore_steps
         cp.constrained_addrs = list(self.constrained_addrs)
@@ -522,7 +549,7 @@ class Crash(object):
         l.info("reconstraining flag")
 
         replace_dict = dict()
-        for c in self._tracer.preconstraints:
+        for c in state.preconstrainer.preconstraints:
             if any([v.startswith('cgc-flag') or v.startswith("random") for v in list(c.variables)]):
                 concrete = next(a for a in c.args if not a.symbolic)
                 symbolic = next(a for a in c.args if a.symbolic)
@@ -632,10 +659,12 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        if self._tracer is not None and self._tracer.about_to_crash is not None:
-            recent_actions = reversed(self._tracer.about_to_crash.history.recent_actions)
+        if self._c is not None and self._c._crash_mode:
+            recent_actions = reversed(self._c.last_state.history.recent_actions)
+            state = self._c.last_state
         else:
             recent_actions = reversed(self.state.history.actions)
+            state = self.state
         for a in recent_actions:
             if a.type == 'mem':
                 if self.state.se.symbolic(a.addr):
