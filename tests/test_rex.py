@@ -374,6 +374,7 @@ def run_all():
     all_functions = dict(filter((lambda (k, v): k.startswith('test_')), functions.items()))
     for f in sorted(all_functions.keys()):
         if hasattr(all_functions[f], '__call__'):
+            print f
             all_functions[f]()
 
 if __name__ == "__main__":
