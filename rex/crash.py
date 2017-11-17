@@ -45,13 +45,19 @@ class Crash(object):
         self.binary = binary
         self.crash  = crash
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
-        self.hooks = hooks
+        self.hooks = {} if hooks is None else hooks
         self.explore_steps = explore_steps
 
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
-        self.project = angr.misc.tracer.make_tracer_project(binary=binary, hooks=self.hooks)
+        self.project = angr.Project(binary)
+        for addr, proc in self.hooks.iteritems():
+            self.project.hook(addr, proc)
+            l.debug("Hooking %#x -> %s...", addr, proc.display_name)
+
+        if self.project.loader.main_object.os == 'cgc':
+            self.project._simos.syscall_library.procedures.update(angr.TRACER_CGC_SYSCALLS)
 
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
         # hash binary contents for rop cache name
@@ -122,9 +128,6 @@ class Crash(object):
                                                   remove_options=remove_options,
                                                   constrained_addrs=self.constrained_addrs)
 
-            ChallRespInfo.prep_tracer(s, format_infos)
-            ZenPlugin.prep_tracer(s)
-
             simgr = self.project.factory.simgr(s,
                                                save_unsat=True,
                                                hierarchy=False,
@@ -137,6 +140,10 @@ class Crash(object):
             simgr.use_technique(self._c)
             simgr.use_technique(self._t)
             simgr.use_technique(angr.exploration_techniques.Oppologist())
+
+            s = simgr.one_active
+            ChallRespInfo.prep_tracer(s, format_infos)
+            ZenPlugin.prep_tracer(s)
 
             simgr.run()
 
