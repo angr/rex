@@ -8,10 +8,10 @@ import random
 import tracer
 import hashlib
 import operator
-from .trace_additions import ChallRespInfo, ZenPlugin
 from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from rex.vulnerability import Vulnerability
 from angr import sim_options as so
+from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 
 
 class NonCrashingInput(Exception):
