@@ -3,7 +3,7 @@ import nose
 import struct
 import colorguard
 from rex.vulnerability import Vulnerability
-from rex.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt, FormatInfoDontConstrain
+from angr.state_plugins.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt, FormatInfoDontConstrain
 
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
