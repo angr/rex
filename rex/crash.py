@@ -57,7 +57,7 @@ class Crash(object):
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
         if self.project.loader.main_object.os == 'cgc':
-            self.project._simos.syscall_library.procedures.update(angr.TRACER_CGC_SYSCALLS)
+            self.project._simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
         # hash binary contents for rop cache name
