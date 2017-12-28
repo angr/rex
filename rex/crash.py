@@ -19,28 +19,34 @@ class NonCrashingInput(Exception):
 
 
 class Crash(object):
-    '''
+    """
     Triage a crash using angr.
-    '''
+    """
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True,
-                 explore_steps=0, angrop_object=None):
-        '''
-        :param binary: path to the binary which crashed
-        :param crash: string of input which crashed the binary
-        :param pov_file: CGC PoV describing a crash
-        :param aslr: analyze the crash with aslr on or off
-        :param constrained_addrs: list of addrs which have been constrained during exploration
-        :param crash_state: an already traced crash state
-        :param prev_path: path leading up to the crashing block
-        :param hooks: dictionary of simprocedure hooks, addresses to simprocedures
-        :param format_infos: a list of atoi FormatInfo objects that should be used when analyzing the crash
-        :param rop_cache_tuple: a angrop tuple to load from
-        :param use_rop: whether or not to use rop
-        :param explore_steps: number of steps which have already been explored, should only set by exploration methods
-        :param angrop_object: an angrop object, should only be set by exploration methods
-        '''
+                 explore_steps=0, angrop_object=None, argv=None):
+        """
+        :param binary           : Path to the binary which crashed.
+        :param crash            : String of input which crashed the binary.
+        :param pov_file         : CGC PoV describing a crash.
+        :param aslr             : Analyze the crash with aslr on or off.
+        :param constrained_addrs: List of addrs which have been constrained
+                                  during exploration.
+        :param crash_state      : An already traced crash state.
+        :param prev_path        : Path leading up to the crashing block.
+        :param hooks            : Dictionary of simprocedure hooks, addresses
+                                  to simprocedures.
+        :param format_infos     : A list of atoi FormatInfo objects that should
+                                  be used when analyzing the crash.
+        :param rop_cache_tuple  : A angrop tuple to load from.
+        :param use_rop          : Whether or not to use rop.
+        :param explore_steps    : Number of steps which have already been explored, should
+                                  only set by exploration methods.
+        :param angrop_object    : An angrop object, should only be set by
+                                  exploration methods.
+        :param argv             : Optionally specify argv params (i,e,: ['./calc', 'parm1']).
+        """
 
         self.binary = binary
         self.crash  = crash
@@ -120,13 +126,22 @@ class Crash(object):
             else:
                 input = self.crash
 
-            r = tracer.QEMURunner(binary=binary, input=input)
+            r = tracer.QEMURunner(binary=binary, input=input, argv=argv)
 
-            s = self.project.factory.tracer_state(input_content=input,
-                                                  magic_content=r.magic,
-                                                  add_options=add_options,
-                                                  remove_options=remove_options,
-                                                  constrained_addrs=self.constrained_addrs)
+            if self.project.loader.main_object.os == 'cgc':
+                s = self.project.factory.tracer_state(input_content=input,
+                                                      magic_content=r.magic,
+                                                      add_options=add_options,
+                                                      remove_options=remove_options,
+                                                      constrained_addrs=self.constrained_addrs)
+
+            elif self.project.loader.main_object.os.startswith('UNIX'):
+                s = self.project.factory.tracer_state(input_content=input,
+                                                      magic_content=r.magic,
+                                                      add_options=add_options,
+                                                      remove_options=remove_options,
+                                                      constrained_addrs=self.constrained_addrs,
+                                                      args=argv)
 
             simgr = self.project.factory.simgr(s,
                                                save_unsat=True,
@@ -704,11 +719,12 @@ class Crash(object):
 
 class QuickCrash(object):
 
-    def __init__(self, binary, crash):
+    def __init__(self, binary, crash, argv=None):
         """
         Quickly triage a crash with just QEMU. Less accurate, but much faster.
-        :param binary: path to binary which crashed
-        :param crash: input which caused crash
+        :param binary: Path to binary which crashed.
+        :param crash : Input which caused crash.
+        :param argv  : Optionally specify argv params (i,e,: ['./calc', 'parm1']).
         """
 
         self.binary = binary
@@ -716,21 +732,21 @@ class QuickCrash(object):
         self.crash = crash
 
         self.bb_count = None
-        self.crash_pc, self.kind = self._quick_triage(binary, crash)
+        self.crash_pc, self.kind = self._quick_triage(binary, crash, argv=argv)
 
-    def _quick_triage(self, binary, crash):
+    def _quick_triage(self, binary, crash, argv=None):
 
         l.debug("quick triaging crash against '%s'", binary)
 
         arbitrary_syscall_arg = False
-        r = tracer.QEMURunner(binary, crash, record_trace=True, use_tiny_core=True, record_core=True)
+        r = tracer.QEMURunner(binary, crash, record_trace=True, use_tiny_core=True, record_core=True, argv=argv)
 
         self.bb_count = len(r.trace)
 
         if not r.crash_mode:
 
             # try again to catch bad args
-            r = tracer.QEMURunner(binary, crash, report_bad_args=True, record_core=True)
+            r = tracer.QEMURunner(binary, crash, report_bad_args=True, record_core=True, argv=argv)
             arbitrary_syscall_arg = True
             if not r.crash_mode:
                 raise NonCrashingInput("input did not cause a crash")
@@ -770,7 +786,10 @@ class QuickCrash(object):
 
         l.debug("checking if ip register points to executable memory")
 
-        start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS})
+        if project.loader.main_object.os == 'cgc':
+            start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS})
+        elif project.loader.main_object.os.startswith('UNIX'):
+            start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS}, args=argv)
 
         # was ip mapped?
         ip_overwritten = False
