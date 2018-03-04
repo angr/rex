@@ -581,7 +581,7 @@ class Crash(object):
         for c in cons:
             new_c = c.replace_dict(replace_dict)
             new_cons.append(new_c)
-        state.release_plugin("solver_engine")
+        state.release_plugin("solver")
         state.add_constraints(*new_cons)
         state.downsize()
         state.se.simplify()
