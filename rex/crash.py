@@ -12,6 +12,8 @@ from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploit
 from rex.vulnerability import Vulnerability
 from angr import sim_options as so
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
+from angr.state_plugins.preconstrainer import SimStatePreconstrainer
+from angr.storage.file import SimFileStream
 
 
 class NonCrashingInput(Exception):
@@ -129,19 +131,22 @@ class Crash(object):
             r = tracer.QEMURunner(binary=binary, input=input, argv=argv)
 
             if self.project.loader.main_object.os == 'cgc':
-                s = self.project.factory.tracer_state(input_content=input,
-                                                      magic_content=r.magic,
-                                                      add_options=add_options,
-                                                      remove_options=remove_options,
-                                                      constrained_addrs=self.constrained_addrs)
+                s = self.project.factory.tracer_state(mode='tracing',
+                        stdin=SimFileStream,
+                        flag_page=r.magic,
+                        add_options=add_options,
+                        remove_options=remove_options)
+                s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
 
             elif self.project.loader.main_object.os.startswith('UNIX'):
-                s = self.project.factory.tracer_state(input_content=input,
-                                                      magic_content=r.magic,
-                                                      add_options=add_options,
-                                                      remove_options=remove_options,
-                                                      constrained_addrs=self.constrained_addrs,
-                                                      args=argv)
+                s = self.project.factory.tracer_state(mode='tracing',
+                        stdin=SimFileStream,
+                        add_options=add_options,
+                        remove_options=remove_options,
+                        argv=argv)
+                s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
 
             simgr = self.project.factory.simgr(s,
                                                save_unsat=True,
@@ -149,10 +154,10 @@ class Crash(object):
                                                save_unconstrained=r.crash_mode)
 
             self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2)
-            self._c = angr.exploration_techniques.CrashMonitor(trace=r.trace,
-                                                               crash_mode=r.crash_mode,
-                                                               crash_addr=r.crash_addr)
-            simgr.use_technique(self._c)
+            if r.crash_mode:
+                self._c = angr.exploration_techniques.CrashMonitor(trace=r.trace,
+                                                                   crash_addr=r.crash_addr)
+                simgr.use_technique(self._c)
             simgr.use_technique(self._t)
             simgr.use_technique(angr.exploration_techniques.Oppologist())
 
