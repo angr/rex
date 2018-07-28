@@ -140,11 +140,11 @@ class Crash(object):
                 s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
 
             elif self.project.loader.main_object.os.startswith('UNIX'):
-                s = self.project.factory.tracer_state(mode='tracing',
-                        stdin=SimFileStream,
-                        add_options=add_options,
-                        remove_options=remove_options,
-                        argv=argv)
+                s = self.project.factory.full_init_state(mode='tracing',
+                                    stdin=SimFileStream,
+                                    add_options=add_options,
+                                    remove_options=remove_options,
+                                    args=argv)                
                 s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
                 s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
 
