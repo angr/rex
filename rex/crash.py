@@ -1,5 +1,7 @@
 import logging
 
+from tracer import TracerPoV
+
 l = logging.getLogger("rex.Crash")
 
 import os
@@ -60,7 +62,7 @@ class Crash(object):
             raise CannotExploit("Too many steps taken during crash exploration")
 
         self.project = angr.Project(binary)
-        for addr, proc in self.hooks.iteritems():
+        for addr, proc in self.hooks.items():
             self.project.hook(addr, proc)
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
@@ -124,34 +126,38 @@ class Crash(object):
                 raise ValueError("cannot specify both a pov_file and an crash")
 
             if pov_file is not None:
-                input = TracerPoV(pov_file)
+                input_data = TracerPoV(pov_file)
             else:
-                input = self.crash
+                input_data = self.crash
 
-            r = tracer.QEMURunner(binary=binary, input=input, argv=argv)
+            r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv)
 
+            kwargs = {}
             if self.project.loader.main_object.os == 'cgc':
-                s = self.project.factory.tracer_state(mode='tracing',
-                        stdin=SimFileStream,
-                        flag_page=r.magic,
-                        add_options=add_options,
-                        remove_options=remove_options)
-                s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
-
+                kwargs['flag_page'] = r.magic
+                cgc = True
             elif self.project.loader.main_object.os.startswith('UNIX'):
-                s = self.project.factory.full_init_state(mode='tracing',
-                                    stdin=SimFileStream,
-                                    add_options=add_options,
-                                    remove_options=remove_options,
-                                    args=argv)                
-                s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
+                kwargs['args'] = argv
+                cgc = False
+            else:
+                raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
 
-            simgr = self.project.factory.simgr(s,
-                                               save_unsat=True,
-                                               hierarchy=False,
-                                               save_unconstrained=r.crash_mode)
+            s = self.project.factory.full_init_state(
+                mode='tracing',
+                stdin=SimFileStream,
+                add_options=add_options,
+                remove_options=remove_options,
+                **kwargs
+            )
+            s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+            s.preconstrainer.preconstrain_file(input_data, s.posix.stdin, True)
+
+            simgr = self.project.factory.simgr(
+                s,
+                save_unsat=True,
+                hierarchy=False,
+                save_unconstrained=r.crash_mode
+            )
 
             self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2)
             if r.crash_mode:
@@ -161,9 +167,10 @@ class Crash(object):
             simgr.use_technique(self._t)
             simgr.use_technique(angr.exploration_techniques.Oppologist())
 
-            s = simgr.one_active
-            ChallRespInfo.prep_tracer(s, format_infos)
-            ZenPlugin.prep_tracer(s)
+            if cgc:
+                s = simgr.one_active
+                ChallRespInfo.prep_tracer(s, format_infos)
+                ZenPlugin.prep_tracer(s)
 
             simgr.run()
 
@@ -449,15 +456,14 @@ class Crash(object):
         min_read = self.state.se.min(self.violating_action.addr)
         max_read = self.state.se.max(self.violating_action.addr)
 
-        largest_regions = map(operator.itemgetter(0), largest_regions)
         # filter addresses which fit between the min and max possible address
-        largest_regions = filter(lambda x: (min_read <= x) and (x <= max_read), largest_regions)
+        largest_regions = [x[0] for x in largest_regions if min_read <= x[0] <= max_read]
 
         # populate the rest of the list with addresses from the binary
         min_addr = self.project.loader.main_object.min_addr
         max_addr = self.project.loader.main_object.max_addr
         pages = range(min_addr, max_addr, 0x1000)
-        pages = filter(lambda x: (min_read <= x) and (x <= max_read), pages)
+        pages = [x for x in pages if min_read <= x <= max_read]
 
         read_addr = None
         constraint = None
@@ -512,7 +518,7 @@ class Crash(object):
         for eobj in elf_objects:
             segs.extend(filter(lambda s: s.is_writable, eobj.segments))
 
-        segs = filter(lambda s: (s.min_addr <= max_write) and (s.max_addr >= min_write), segs)
+        segs = [s for s in segs if min_write <= s.max_addr and max_write <= s.min_addr]
 
         write_addr = None
         constraint = None
@@ -642,7 +648,7 @@ class Crash(object):
 
         sbits = 0
 
-        for bitidx in xrange(self.state.arch.bits):
+        for bitidx in range(self.state.arch.bits):
             if st[bitidx].symbolic:
                 sbits += 1
 
@@ -776,7 +782,7 @@ class QuickCrash(object):
             l.debug("checking which system call had bad args")
 
             syscall_num = r.reg_vals['eax']
-            vulns = {2: Vulnerability.ARBITRARY_TRANSMIT, \
+            vulns = {2: Vulnerability.ARBITRARY_TRANSMIT,
                      3: Vulnerability.ARBITRARY_RECEIVE}
 
             # shouldn't ever happen but in case it does
@@ -795,6 +801,8 @@ class QuickCrash(object):
             start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS})
         elif project.loader.main_object.os.startswith('UNIX'):
             start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS}, args=argv)
+        else:
+            raise ValueError("Can't analyse OS %s" % project.loader.main_object.os)
 
         # was ip mapped?
         ip_overwritten = False

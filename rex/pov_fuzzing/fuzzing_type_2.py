@@ -6,7 +6,7 @@ import operator
 import itertools
 from collections import defaultdict
 from multiprocessing import Pool
-from ..crash import CannotExploit
+from functools import reduce
 
 from angrop import rop_utils
 import claripy
@@ -16,7 +16,8 @@ import angr
 import tracer
 import compilerex
 
-import fuzzing_type_2_c_template
+from ..crash import CannotExploit
+from . import fuzzing_type_2_c_template
 
 l = logging.getLogger("rex.fuzzing_type_1")
 logging.getLogger("cle.elfcore").setLevel("CRITICAL")
@@ -173,7 +174,7 @@ class Type2CrashFuzzer(object):
     @staticmethod
     def _replace_indices(s, c, indices):
         for i in indices:
-            s = s[:i] + c + s[i+1:]
+            s = s[:i] + bytes([c]) + s[i+1:]
         return s
 
     @staticmethod
@@ -200,7 +201,7 @@ class Type2CrashFuzzer(object):
         if (number_bits, bit_indices) in self._bit_patterns:
             return set(self._bit_patterns[(number_bits, bit_indices)])
         all_patterns = set()
-        for i in xrange(2 ** number_bits):
+        for i in range(2 ** number_bits):
             pattern = 0
             for n, index in enumerate(bit_indices):
                 if (1 << n) & i != 0:
@@ -229,7 +230,7 @@ class Type2CrashFuzzer(object):
         # run on the prefilter
         binary_input_bytes = []
         for i in _PREFILTER_BYTES:
-            test_input = self._replace_indices(self.crash, chr(i), byte_indices)
+            test_input = self._replace_indices(self.crash, i, byte_indices)
             binary_input_bytes.append((self.binary, test_input, chr(i)))
         it = self.pool.imap_unordered(_get_reg_vals, binary_input_bytes)
         for c, reg_vals in it:
@@ -261,10 +262,10 @@ class Type2CrashFuzzer(object):
         if all(len(possible_sets[r]) <= 2 for r in possible_sets):
             return False
 
-        for i in xrange(256):
+        for i in range(256):
             if i in _PREFILTER_BYTES:
                 continue
-            test_input = self._replace_indices(self.crash, chr(i), byte_indices)
+            test_input = self._replace_indices(self.crash, i, byte_indices)
             binary_input_bytes.append((self.binary, test_input, chr(i)))
         it = self.pool.imap_unordered(_get_reg_vals, binary_input_bytes, chunksize=4)
         for c, reg_vals in it:
@@ -435,7 +436,7 @@ class Type2CrashFuzzer(object):
     @staticmethod
     def _longest_common_prefix(strs):
         common_prefix = ""
-        for i in itertools.izip(*strs):
+        for i in zip(*strs):
             if i.count(i[0]) == len(i):
                 common_prefix += i[0]
             else:
@@ -478,7 +479,7 @@ class Type2CrashFuzzer(object):
         max_working = current_len
         min_working = current_len
         for i in range(1, current_len + 10):
-            test_input = self._replace_indices_len(self.crash, "1"*i, current_len, byte_indices)
+            test_input = self._replace_indices_len(self.crash, b"1"*i, current_len, byte_indices)
             expected = int("1"*i, base) & 0xffffffff
             reg_vals = _get_reg_vals((self.binary, test_input, 0))[1]
             if reg_vals is None or reg_vals[reg] != expected:
