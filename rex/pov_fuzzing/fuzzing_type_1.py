@@ -651,7 +651,7 @@ translate_byte_%#x(curr, orig);
 
         encoded_payload = ""
         for c in self.crash:
-            encoded_payload += "\\x%02x" % ord(c)
+            encoded_payload += "\\x%02x" % c
         fmt_args = dict()
         fmt_args["register"] = general_reg
         fmt_args["regmask"] = hex(reg_bitmasks[general_reg])

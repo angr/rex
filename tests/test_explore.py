@@ -8,7 +8,7 @@ def test_write_what_where_shadowstack():
     """
     Test that our write what where exploit can leak, and works in the presence of a shadowstack
     """
-    crash_str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+    crash_str = b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
     crash = rex.Crash(os.path.join(bin_location + "/tests/i386/write_what_where_shadow_stack"), crash_str)
     arsenal = crash.exploit()
     exploit = arsenal.best_type2
@@ -16,7 +16,7 @@ def test_write_what_where_shadowstack():
 
 def run_all():
     functions = globals()
-    all_functions = dict(filter((lambda (k, v): k.startswith('test_')), functions.items()))
+    all_functions = dict(filter((lambda kv: kv[0].startswith('test_')), functions.items()))
     for f in sorted(all_functions.keys()):
         if hasattr(all_functions[f], '__call__'):
             all_functions[f]()

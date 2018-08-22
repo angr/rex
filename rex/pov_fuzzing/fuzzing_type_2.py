@@ -658,7 +658,7 @@ class Type2CrashFuzzer(object):
         """
         encoded_payload = ""
         for c in self._raw_payload:
-            encoded_payload += "\\x%02x" % ord(c)
+            encoded_payload += "\\x%02x" % c
 
         fmt_args = dict()
         fmt_args["payload"] = encoded_payload
