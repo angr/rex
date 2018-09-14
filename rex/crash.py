@@ -167,7 +167,7 @@ class Crash(object):
             if cgc:
                 s.preconstrainer.preconstrain_flag_page(r.magic)
 
-            simgr = self.project.factory.simgr(
+            simgr = self.project.factory.simulation_manager(
                 s,
                 save_unsat=True,
                 hierarchy=False,
