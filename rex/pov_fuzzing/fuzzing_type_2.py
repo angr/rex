@@ -107,7 +107,7 @@ class Type2CrashFuzzer(object):
             s = rop_utils.make_symbolic_state(self._p, reg_list=CGC_GENERAL_REGS)
             self._reg_asts = dict()
             for r in CGC_GENERAL_REGS:
-                ast = s.se.BVS(r, 32, explicit_name=True)
+                ast = s.solver.BVS(r, 32, explicit_name=True)
                 self._reg_asts[r] = ast
                 s.registers.store(r, ast)
             s.ip = self.orig_regs["eip"]

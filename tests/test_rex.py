@@ -105,10 +105,10 @@ def test_shellcode_placement():
     exploit = arsenal.register_setters[0]
 
     # make sure the shellcode was placed into the executable heap page
-    heap_top = crash.state.se.eval(crash.state.cgc.allocation_base)
+    heap_top = crash.state.solver.eval(crash.state.cgc.allocation_base)
     nose.tools.assert_equal(struct.unpack("<I", exploit._raw_payload[-4:])[0] & 0xfffff000, heap_top)
 
-    exec_regions = list(filter(lambda a: crash.state.se.eval(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem))
+    exec_regions = list(filter(lambda a: crash.state.solver.eval(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem))
 
     # should just be two executable regions
     nose.tools.assert_equal(len(exec_regions), 2)
@@ -152,7 +152,7 @@ def break_cpp_vptr_smash():#L165
     crash.explore()
     # after exploring the crash we should see that it is exploitable
     nose.tools.assert_true(crash.exploitable)
-    nose.tools.assert_true(crash.state.se.symbolic(crash.state.regs.pc))
+    nose.tools.assert_true(crash.state.solver.symbolic(crash.state.regs.pc))
 
     # let's generate some exploits for it
     arsenal = crash.exploit()

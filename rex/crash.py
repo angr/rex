@@ -434,13 +434,13 @@ class Crash(object):
 
         # see if we can point randomly inside the flag (prevent people filtering exactly 0x4347c000)
         rand_addr = random.randint(cgc_magic_page_addr, cgc_magic_page_addr+0x1000-4)
-        if state.se.satisfiable(extra_constraints=(violating_addr == rand_addr,)):
+        if state.solver.satisfiable(extra_constraints=(violating_addr == rand_addr,)):
             cp = state.copy()
             cp.add_constraints(violating_addr == rand_addr)
             return cp
 
         # see if we can point anywhere at flag
-        if state.se.satisfiable(extra_constraints=
+        if state.solver.satisfiable(extra_constraints=
                                 (violating_addr >= cgc_magic_page_addr,
                                  violating_addr < cgc_magic_page_addr+0x1000-4)):
             cp = state.copy()
@@ -452,7 +452,7 @@ class Crash(object):
 
     @staticmethod
     def _get_state_pointing_to_addr(state, violating_addr, goal_addr):
-        if state.se.satisfiable(extra_constraints=(violating_addr == goal_addr,)):
+        if state.solver.satisfiable(extra_constraints=(violating_addr == goal_addr,)):
             cp = state.copy()
             cp.add_constraints(violating_addr == goal_addr)
             return cp
@@ -468,8 +468,8 @@ class Crash(object):
                 key=operator.itemgetter(1),
                 reverse=True)
 
-        min_read = self.state.se.min(self.violating_action.addr)
-        max_read = self.state.se.max(self.violating_action.addr)
+        min_read = self.state.solver.min(self.violating_action.addr)
+        max_read = self.state.solver.max(self.violating_action.addr)
 
         # filter addresses which fit between the min and max possible address
         largest_regions = [x[0] for x in largest_regions if min_read <= x[0] <= max_read]
@@ -486,7 +486,7 @@ class Crash(object):
             read_addr = addr
             constraint = self.violating_action.addr == addr
 
-            if self.state.se.satisfiable(extra_constraints=(constraint,)):
+            if self.state.solver.satisfiable(extra_constraints=(constraint,)):
                 break
 
             constraint = None
@@ -526,8 +526,8 @@ class Crash(object):
 
         assert len(elf_objects) > 0, "target binary is not ELF or CGC, unsupported by rex"
 
-        min_write = self.state.se.min(self.violating_action.addr)
-        max_write = self.state.se.max(self.violating_action.addr)
+        min_write = self.state.solver.min(self.violating_action.addr)
+        max_write = self.state.solver.max(self.violating_action.addr)
 
         segs = [ ]
         for eobj in elf_objects:
@@ -542,7 +542,7 @@ class Crash(object):
                 write_addr = page
                 constraint = self.violating_action.addr == page
 
-                if self.state.se.satisfiable(extra_constraints=(constraint,)):
+                if self.state.solver.satisfiable(extra_constraints=(constraint,)):
                     break
 
                 constraint = None
@@ -602,7 +602,7 @@ class Crash(object):
                 concrete = next(a for a in c.args if not a.symbolic)
                 symbolic = next(a for a in c.args if a.symbolic)
                 replace_dict[symbolic.cache_key] = concrete
-        cons = state.se.constraints
+        cons = state.solver.constraints
         new_cons = []
         for c in cons:
             new_c = c.replace_dict(replace_dict)
@@ -610,7 +610,7 @@ class Crash(object):
         state.release_plugin("solver")
         state.add_constraints(*new_cons)
         state.downsize()
-        state.se.simplify()
+        state.solver.simplify()
 
     def one_of(self, crash_types):
         '''
@@ -681,7 +681,7 @@ class Crash(object):
             self.crash_types.append(Vulnerability.ARBITRARY_TRANSMIT)
 
         # we assume a symbolic eip is always exploitable
-        if self.state.se.symbolic(ip):
+        if self.state.solver.symbolic(ip):
             # how much control of ip do we have?
             if self._symbolic_control(ip) >= self.state.arch.bits:
                 l.info("detected ip overwrite vulnerability")
@@ -692,7 +692,7 @@ class Crash(object):
 
             return
 
-        if self.state.se.symbolic(bp):
+        if self.state.solver.symbolic(bp):
             # how much control of bp do we have
             if self._symbolic_control(bp) >= self.state.arch.bits:
                 l.info("detected bp overwrite vulnerability")
@@ -715,7 +715,7 @@ class Crash(object):
             state = self.state
         for a in recent_actions:
             if a.type == 'mem':
-                if self.state.se.symbolic(a.addr):
+                if self.state.solver.symbolic(a.addr):
                     symbolic_actions.append(a)
 
         # TODO: pick the crashing action based off the crashing instruction address,
@@ -723,7 +723,7 @@ class Crash(object):
        #import ipdb; ipdb.set_trace()
         for sym_action in symbolic_actions:
             if sym_action.action == "write":
-                if self.state.se.symbolic(sym_action.data):
+                if self.state.solver.symbolic(sym_action.data):
                     l.info("detected write-what-where vulnerability")
                     self.crash_types.append(Vulnerability.WRITE_WHAT_WHERE)
                 else:
@@ -866,7 +866,7 @@ class QuickCrash(object):
         for a in next_pth.history.recent_actions:
             if a.type == 'mem':
 
-                target_addr = start_state.se.eval(a.addr)
+                target_addr = start_state.solver.eval(a.addr)
                 if target_addr < 0x1000:
                     l.debug("attempt to write or read to address of NULL")
                     return pc, Vulnerability.NULL_DEREFERENCE
