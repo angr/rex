@@ -1,5 +1,7 @@
 import logging
 
+from tracer import TracerPoV
+
 l = logging.getLogger("rex.Crash")
 
 import os
@@ -13,6 +15,7 @@ from rex.vulnerability import Vulnerability
 from angr import sim_options as so
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
+from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
 
 
@@ -60,16 +63,13 @@ class Crash(object):
             raise CannotExploit("Too many steps taken during crash exploration")
 
         self.project = angr.Project(binary)
-        for addr, proc in self.hooks.iteritems():
+        for addr, proc in self.hooks.items():
             self.project.hook(addr, proc)
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
-        if self.project.loader.main_object.os == 'cgc':
-            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
-
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
         # hash binary contents for rop cache name
-        binhash = hashlib.md5(open(self.binary).read()).hexdigest()
+        binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
         rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
 
         if use_rop:
@@ -84,10 +84,16 @@ class Crash(object):
                     l.info("loading rop gadgets from cache '%s'", rop_cache_path)
                     self.rop.load_gadgets(rop_cache_path)
                 else:
-                    self.rop.find_gadgets(show_progress=False)
+                    if angr.misc.testing.is_testing:
+                        self.rop.find_gadgets_single_threaded(show_progress=False)
+                    else:
+                        self.rop.find_gadgets(show_progress=False)
                     self.rop.save_gadgets(rop_cache_path)
         else:
             self.rop = None
+
+        if self.project.loader.main_object.os == 'cgc':
+            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
         self.os = self.project.loader.main_object.os
 
@@ -124,34 +130,49 @@ class Crash(object):
                 raise ValueError("cannot specify both a pov_file and an crash")
 
             if pov_file is not None:
-                input = TracerPoV(pov_file)
+                input_data = TracerPoV(pov_file)
             else:
-                input = self.crash
+                input_data = self.crash
 
-            r = tracer.QEMURunner(binary=binary, input=input, argv=argv)
+            r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv)
 
+            kwargs = {}
             if self.project.loader.main_object.os == 'cgc':
-                s = self.project.factory.tracer_state(mode='tracing',
-                        stdin=SimFileStream,
-                        flag_page=r.magic,
-                        add_options=add_options,
-                        remove_options=remove_options)
-                s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
-
+                cgc = True
             elif self.project.loader.main_object.os.startswith('UNIX'):
-                s = self.project.factory.full_init_state(mode='tracing',
-                                    stdin=SimFileStream,
-                                    add_options=add_options,
-                                    remove_options=remove_options,
-                                    args=argv)                
-                s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
+                if argv is None:
+                    argv = ['./binary']
+                kwargs['args'] = argv
+                cgc = False
+            else:
+                raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
 
-            simgr = self.project.factory.simgr(s,
-                                               save_unsat=True,
-                                               hierarchy=False,
-                                               save_unconstrained=r.crash_mode)
+            s = self.project.factory.full_init_state(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options,
+                **kwargs
+            )
+            s.register_plugin('posix', SimSystemPosix(
+                stdin=SimFileStream(name='stdin', ident='aeg_stdin'),
+                stdout=SimFileStream(name='stdout'),
+                stderr=SimFileStream(name='stderr'),
+                argc=s.posix.argc,
+                argv=s.posix.argv,
+                environ=s.posix.environ,
+                auxv=s.posix.auxv,
+            ))
+            s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+            s.preconstrainer.preconstrain_file(input_data, s.posix.stdin, True)
+            if cgc:
+                s.preconstrainer.preconstrain_flag_page(r.magic)
+
+            simgr = self.project.factory.simulation_manager(
+                s,
+                save_unsat=True,
+                hierarchy=False,
+                save_unconstrained=r.crash_mode
+            )
 
             self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2)
             if r.crash_mode:
@@ -161,9 +182,10 @@ class Crash(object):
             simgr.use_technique(self._t)
             simgr.use_technique(angr.exploration_techniques.Oppologist())
 
-            s = simgr.one_active
-            ChallRespInfo.prep_tracer(s, format_infos)
-            ZenPlugin.prep_tracer(s)
+            if cgc:
+                s = simgr.one_active
+                ChallRespInfo.prep_tracer(s, format_infos)
+                ZenPlugin.prep_tracer(s)
 
             simgr.run()
 
@@ -177,8 +199,8 @@ class Crash(object):
                 self.state = simgr.traced[0]
                 self.prev = self.state
 
-            zp = self.state.get_plugin('zen_plugin')
-            if 'crashed' not in simgr.stashes and (zp is not None and len(zp.controlled_transmits) == 0):
+            zp = self.state.get_plugin('zen_plugin') if cgc else None
+            if 'crashed' not in simgr.stashes and zp is not None and len(zp.controlled_transmits) == 0:
                 l.warning("input did not cause a crash")
                 raise NonCrashingInput
 
@@ -200,7 +222,7 @@ class Crash(object):
 
         memory_writes = sorted(self.state.memory.mem.get_symbolic_addrs())
         l.debug("filtering writes")
-        memory_writes = [m for m in memory_writes if m/0x1000 != 0x4347c]
+        memory_writes = [m for m in memory_writes if m//0x1000 != 0x4347c]
         user_writes = [m for m in memory_writes if any("stdin" in v for v in self.state.memory.load(m, 1).variables)]
         flag_writes = [m for m in memory_writes if any(v.startswith("cgc-flag") for v in self.state.memory.load(m, 1).variables)]
         l.debug("done filtering writes")
@@ -319,8 +341,8 @@ class Crash(object):
             if self.violating_action:
                 violating_actions.append((self.state, self.violating_action.addr))
 
-        zp = self.state.get_plugin('zen_plugin')
-        if zp is not None:
+        if self.project.loader.main_object.os == 'cgc':
+            zp = self.state.get_plugin('zen_plugin')
             for st, addr in zp.controlled_transmits:
                 st.preconstrainer.remove_preconstraints()
                 violating_actions.append((st, addr))
@@ -378,7 +400,7 @@ class Crash(object):
         for arg in ast.args:
             # if it's not byte aligned
             if offset % 8 != 0:
-                offset += arg.size()/8
+                offset += arg.size()//8
                 continue
 
             # check if the arg is a flag byte
@@ -388,11 +410,11 @@ class Crash(object):
 
                 if flag_start_off is None:
                     # no start
-                    flag_start_off = offset / 8
+                    flag_start_off = offset // 8
                     first_flag_index = flag_byte
-                elif (offset/8 - flag_start_off) != flag_byte - first_flag_index:
+                elif (offset//8 - flag_start_off) != flag_byte - first_flag_index:
                     # not contiguous
-                    flag_start_off = offset/8
+                    flag_start_off = offset//8
                     first_flag_index = flag_byte
                 else:
                     # contiguous
@@ -412,13 +434,13 @@ class Crash(object):
 
         # see if we can point randomly inside the flag (prevent people filtering exactly 0x4347c000)
         rand_addr = random.randint(cgc_magic_page_addr, cgc_magic_page_addr+0x1000-4)
-        if state.se.satisfiable(extra_constraints=(violating_addr == rand_addr,)):
+        if state.solver.satisfiable(extra_constraints=(violating_addr == rand_addr,)):
             cp = state.copy()
             cp.add_constraints(violating_addr == rand_addr)
             return cp
 
         # see if we can point anywhere at flag
-        if state.se.satisfiable(extra_constraints=
+        if state.solver.satisfiable(extra_constraints=
                                 (violating_addr >= cgc_magic_page_addr,
                                  violating_addr < cgc_magic_page_addr+0x1000-4)):
             cp = state.copy()
@@ -430,7 +452,7 @@ class Crash(object):
 
     @staticmethod
     def _get_state_pointing_to_addr(state, violating_addr, goal_addr):
-        if state.se.satisfiable(extra_constraints=(violating_addr == goal_addr,)):
+        if state.solver.satisfiable(extra_constraints=(violating_addr == goal_addr,)):
             cp = state.copy()
             cp.add_constraints(violating_addr == goal_addr)
             return cp
@@ -446,18 +468,17 @@ class Crash(object):
                 key=operator.itemgetter(1),
                 reverse=True)
 
-        min_read = self.state.se.min(self.violating_action.addr)
-        max_read = self.state.se.max(self.violating_action.addr)
+        min_read = self.state.solver.min(self.violating_action.addr)
+        max_read = self.state.solver.max(self.violating_action.addr)
 
-        largest_regions = map(operator.itemgetter(0), largest_regions)
         # filter addresses which fit between the min and max possible address
-        largest_regions = filter(lambda x: (min_read <= x) and (x <= max_read), largest_regions)
+        largest_regions = [x[0] for x in largest_regions if min_read <= x[0] <= max_read]
 
         # populate the rest of the list with addresses from the binary
         min_addr = self.project.loader.main_object.min_addr
         max_addr = self.project.loader.main_object.max_addr
         pages = range(min_addr, max_addr, 0x1000)
-        pages = filter(lambda x: (min_read <= x) and (x <= max_read), pages)
+        pages = [x for x in pages if min_read <= x <= max_read]
 
         read_addr = None
         constraint = None
@@ -465,7 +486,7 @@ class Crash(object):
             read_addr = addr
             constraint = self.violating_action.addr == addr
 
-            if self.state.se.satisfiable(extra_constraints=(constraint,)):
+            if self.state.solver.satisfiable(extra_constraints=(constraint,)):
                 break
 
             constraint = None
@@ -505,14 +526,14 @@ class Crash(object):
 
         assert len(elf_objects) > 0, "target binary is not ELF or CGC, unsupported by rex"
 
-        min_write = self.state.se.min(self.violating_action.addr)
-        max_write = self.state.se.max(self.violating_action.addr)
+        min_write = self.state.solver.min(self.violating_action.addr)
+        max_write = self.state.solver.max(self.violating_action.addr)
 
         segs = [ ]
         for eobj in elf_objects:
             segs.extend(filter(lambda s: s.is_writable, eobj.segments))
 
-        segs = filter(lambda s: (s.min_addr <= max_write) and (s.max_addr >= min_write), segs)
+        segs = [s for s in segs if s.min_addr <= min_write <= s.max_addr or min_write <= s.min_addr <= max_write]
 
         write_addr = None
         constraint = None
@@ -521,7 +542,7 @@ class Crash(object):
                 write_addr = page
                 constraint = self.violating_action.addr == page
 
-                if self.state.se.satisfiable(extra_constraints=(constraint,)):
+                if self.state.solver.satisfiable(extra_constraints=(constraint,)):
                     break
 
                 constraint = None
@@ -581,7 +602,7 @@ class Crash(object):
                 concrete = next(a for a in c.args if not a.symbolic)
                 symbolic = next(a for a in c.args if a.symbolic)
                 replace_dict[symbolic.cache_key] = concrete
-        cons = state.se.constraints
+        cons = state.solver.constraints
         new_cons = []
         for c in cons:
             new_c = c.replace_dict(replace_dict)
@@ -589,7 +610,7 @@ class Crash(object):
         state.release_plugin("solver")
         state.add_constraints(*new_cons)
         state.downsize()
-        state.se.simplify()
+        state.solver.simplify()
 
     def one_of(self, crash_types):
         '''
@@ -642,7 +663,7 @@ class Crash(object):
 
         sbits = 0
 
-        for bitidx in xrange(self.state.arch.bits):
+        for bitidx in range(self.state.arch.bits):
             if st[bitidx].symbolic:
                 sbits += 1
 
@@ -654,13 +675,13 @@ class Crash(object):
 
         # any arbitrary receives or transmits
         # TODO: receives
-        zp = self.state.get_plugin('zen_plugin')
+        zp = self.state.get_plugin('zen_plugin') if self.project.loader.main_object.os == 'cgc' else None
         if zp is not None and len(zp.controlled_transmits):
             l.debug("detected arbitrary transmit vulnerability")
             self.crash_types.append(Vulnerability.ARBITRARY_TRANSMIT)
 
         # we assume a symbolic eip is always exploitable
-        if self.state.se.symbolic(ip):
+        if self.state.solver.symbolic(ip):
             # how much control of ip do we have?
             if self._symbolic_control(ip) >= self.state.arch.bits:
                 l.info("detected ip overwrite vulnerability")
@@ -671,7 +692,7 @@ class Crash(object):
 
             return
 
-        if self.state.se.symbolic(bp):
+        if self.state.solver.symbolic(bp):
             # how much control of bp do we have
             if self._symbolic_control(bp) >= self.state.arch.bits:
                 l.info("detected bp overwrite vulnerability")
@@ -686,7 +707,7 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        if self._c is not None and self._c._crash_mode:
+        if self._c is not None:
             recent_actions = reversed(self._c.last_state.history.recent_actions)
             state = self._c.last_state
         else:
@@ -694,7 +715,7 @@ class Crash(object):
             state = self.state
         for a in recent_actions:
             if a.type == 'mem':
-                if self.state.se.symbolic(a.addr):
+                if self.state.solver.symbolic(a.addr):
                     symbolic_actions.append(a)
 
         # TODO: pick the crashing action based off the crashing instruction address,
@@ -702,7 +723,7 @@ class Crash(object):
        #import ipdb; ipdb.set_trace()
         for sym_action in symbolic_actions:
             if sym_action.action == "write":
-                if self.state.se.symbolic(sym_action.data):
+                if self.state.solver.symbolic(sym_action.data):
                     l.info("detected write-what-where vulnerability")
                     self.crash_types.append(Vulnerability.WRITE_WHAT_WHERE)
                 else:
@@ -776,7 +797,7 @@ class QuickCrash(object):
             l.debug("checking which system call had bad args")
 
             syscall_num = r.reg_vals['eax']
-            vulns = {2: Vulnerability.ARBITRARY_TRANSMIT, \
+            vulns = {2: Vulnerability.ARBITRARY_TRANSMIT,
                      3: Vulnerability.ARBITRARY_RECEIVE}
 
             # shouldn't ever happen but in case it does
@@ -795,6 +816,8 @@ class QuickCrash(object):
             start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS})
         elif project.loader.main_object.os.startswith('UNIX'):
             start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS}, args=argv)
+        else:
+            raise ValueError("Can't analyse OS %s" % project.loader.main_object.os)
 
         # was ip mapped?
         ip_overwritten = False
@@ -843,7 +866,7 @@ class QuickCrash(object):
         for a in next_pth.history.recent_actions:
             if a.type == 'mem':
 
-                target_addr = start_state.se.eval(a.addr)
+                target_addr = start_state.solver.eval(a.addr)
                 if target_addr < 0x1000:
                     l.debug("attempt to write or read to address of NULL")
                     return pc, Vulnerability.NULL_DEREFERENCE
