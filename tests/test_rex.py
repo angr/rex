@@ -25,6 +25,7 @@ def _do_pov_test(pov, enable_randomness=True):
             return True
     return False
 
+@attr(speed='slow')
 def test_legit_00001():
     '''
     Test exploitation of legit_00001 given a good crash.
