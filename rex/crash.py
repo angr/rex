@@ -58,6 +58,7 @@ class Crash(object):
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.hooks = {} if hooks is None else hooks
         self.explore_steps = explore_steps
+        self._c = None
 
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
@@ -210,7 +211,6 @@ class Crash(object):
             self.state = crash_state
             self.prev = prev_path
             self._t = None
-            self._c = None
 
         # list of actions added during exploitation, probably better object for this attribute to belong to
         self.added_actions = [ ]
@@ -707,7 +707,7 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        if self._c is not None:
+        if hasattr(self, '_c') and self._c is not None:
             recent_actions = reversed(self._c.last_state.history.recent_actions)
             state = self._c.last_state
         else:
