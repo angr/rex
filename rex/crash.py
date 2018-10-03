@@ -30,27 +30,30 @@ class Crash(object):
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True,
-                 explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, trace_timeout=10):
+                 explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, trace_timeout=10):
         """
-        :param binary           : Path to the binary which crashed.
-        :param crash            : String of input which crashed the binary.
-        :param pov_file         : CGC PoV describing a crash.
-        :param aslr             : Analyze the crash with aslr on or off.
-        :param constrained_addrs: List of addrs which have been constrained
-                                  during exploration.
-        :param crash_state      : An already traced crash state.
-        :param prev_path        : Path leading up to the crashing block.
-        :param hooks            : Dictionary of simprocedure hooks, addresses
-                                  to simprocedures.
-        :param format_infos     : A list of atoi FormatInfo objects that should
-                                  be used when analyzing the crash.
-        :param rop_cache_tuple  : A angrop tuple to load from.
-        :param use_rop          : Whether or not to use rop.
-        :param explore_steps    : Number of steps which have already been explored, should
-                                  only set by exploration methods.
-        :param angrop_object    : An angrop object, should only be set by
-                                  exploration methods.
-        :param argv             : Optionally specify argv params (i,e,: ['./calc', 'parm1']).
+        :param binary:              Path to the binary which crashed.
+        :param crash:               String of input which crashed the binary.
+        :param pov_file:            CGC PoV describing a crash.
+        :param aslr:                Analyze the crash with aslr on or off.
+        :param constrained_addrs:   List of addrs which have been constrained
+                                    during exploration.
+        :param crash_state:         An already traced crash state.
+        :param prev_path:           Path leading up to the crashing block.
+        :param hooks:               Dictionary of simprocedure hooks, addresses
+                                    to simprocedures.
+        :param format_infos:        A list of atoi FormatInfo objects that should
+                                    be used when analyzing the crash.
+        :param rop_cache_tuple:     A angrop tuple to load from.
+        :param use_rop:             Whether or not to use rop.
+        :param explore_steps:       Number of steps which have already been explored, should
+                                    only set by exploration methods.
+        :param angrop_object:       An angrop object, should only be set by
+                                    exploration methods.
+        :param argv:                Optionally specify argv params (i,e,: ['./calc', 'parm1']).
+        :param concrete_fs:         Use the host's filesystem for analysis
+        :param chroot:              For concrete_fs: use this host directory as the guest root
+        :param trace_timeout:       Time the tracing operation out after this number of seconds
         """
 
         self.binary = binary
@@ -145,6 +148,9 @@ class Crash(object):
                     argv = ['./binary']
                 kwargs['args'] = argv
                 cgc = False
+
+                kwargs['concrete_fs'] = concrete_fs
+                kwargs['chroot'] = chroot
             else:
                 raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
 
@@ -152,7 +158,6 @@ class Crash(object):
                 mode='tracing',
                 add_options=add_options,
                 remove_options=remove_options,
-                concrete_fs=concrete_fs,
                 **kwargs
             )
             s.register_plugin('posix', SimSystemPosix(
