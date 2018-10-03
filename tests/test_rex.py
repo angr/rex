@@ -125,7 +125,7 @@ def test_boolector_solving():
     crash = b"A" * 64 * 4
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/add_payload"), crash)
 
-    arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
+    arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory'})
 
     nose.tools.assert_true(len(arsenal.register_setters) >= 3)
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
