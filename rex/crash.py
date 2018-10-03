@@ -30,7 +30,7 @@ class Crash(object):
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True,
-                 explore_steps=0, angrop_object=None, argv=None):
+                 explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, trace_timeout=10):
         """
         :param binary           : Path to the binary which crashed.
         :param crash            : String of input which crashed the binary.
@@ -102,7 +102,7 @@ class Crash(object):
         if aslr is None:
             if self.os == "cgc": # cgc has no ASLR, but we don't assume a stackbase
                 self.aslr = False
-            else: # we assume linux is going to enfore stackbased aslr
+            else: # we assume linux is going to enforce stack-based ASLR
                 self.aslr = True
         else:
             self.aslr = aslr
@@ -135,7 +135,7 @@ class Crash(object):
             else:
                 input_data = self.crash
 
-            r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv)
+            r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv, trace_timeout=trace_timeout)
 
             kwargs = {}
             if self.project.loader.main_object.os == 'cgc':
@@ -152,6 +152,7 @@ class Crash(object):
                 mode='tracing',
                 add_options=add_options,
                 remove_options=remove_options,
+                concrete_fs=concrete_fs,
                 **kwargs
             )
             s.register_plugin('posix', SimSystemPosix(
