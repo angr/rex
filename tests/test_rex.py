@@ -25,7 +25,6 @@ def _do_pov_test(pov, enable_randomness=True):
             return True
     return False
 
-@attr(speed='slow')
 def test_legit_00001():
     '''
     Test exploitation of legit_00001 given a good crash.
@@ -35,7 +34,7 @@ def test_legit_00001():
 
     crash = rex.Crash(os.path.join(bin_location, "tests/defcon24/legit_00001"), crash)
 
-    arsenal = crash.exploit()
+    arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
 
     nose.tools.assert_true(len(arsenal.register_setters) >= 2)
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
@@ -59,7 +58,7 @@ def test_legit_00003():
 
     crash.explore()
 
-    arsenal = crash.exploit()
+    arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
 
     nose.tools.assert_true(len(arsenal.register_setters) >= 2)
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
@@ -101,7 +100,7 @@ def test_shellcode_placement():
     crash = b"A" * 272
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/shellcode_tester"), crash)
 
-    arsenal = crash.exploit()
+    arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
     exploit = arsenal.register_setters[0]
 
@@ -125,7 +124,7 @@ def test_boolector_solving():
     crash = b"A" * 64 * 4
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/add_payload"), crash)
 
-    arsenal = crash.exploit()
+    arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
     nose.tools.assert_true(len(arsenal.register_setters) >= 3)
     nose.tools.assert_true(len(arsenal.leakers) >= 1)
@@ -180,7 +179,7 @@ def test_linux_stacksmash():
 
     crash = b"A" * 227
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash)
-    exploit = crash.exploit()
+    exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
     # make sure we're able to exploit it in all possible ways
     nose.tools.assert_equal(len(exploit.arsenal), 3)
@@ -330,7 +329,6 @@ def test_reconstraining():
     nose.tools.assert_true(_do_pov_test(x))
 
 
-@attr(speed='slow')
 def test_cromu71():
     crash_input = b'feq\n &\x06\x00\x80\xee\xeen\nf\x00f_E_p\x00\x00\x80\x00q\n3&\x1b\x17/\x12\x1b\x1e]]]]]]]]]]]]]]]]]]]]\n\x1e\x7f\xffC^\n'
 
@@ -344,7 +342,7 @@ def test_cromu71():
     crash = rex.Crash(binary, crash_input)
 
     # let's generate some exploits for it
-    arsenal = crash.exploit()
+    arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
 
     # make sure it works
     nose.tools.assert_true(_do_pov_test(arsenal.best_type1))
