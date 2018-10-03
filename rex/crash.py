@@ -110,7 +110,7 @@ class Crash(object):
         if crash_state is None:
             # run the tracer, grabbing the crash state
             remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
-                              so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES}
+                              so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES}
             add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
                            so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS}
 
@@ -813,9 +813,9 @@ class QuickCrash(object):
         l.debug("checking if ip register points to executable memory")
 
         if project.loader.main_object.os == 'cgc':
-            start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS})
+            start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS}, remove_options={so.SIMPLIFY_MEMORY_WRITES})
         elif project.loader.main_object.os.startswith('UNIX'):
-            start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS}, args=argv)
+            start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS}, remove_options={so.SIMPLIFY_MEMORY_WRITES}, args=argv)
         else:
             raise ValueError("Can't analyse OS %s" % project.loader.main_object.os)
 
