@@ -30,7 +30,7 @@ class Crash(object):
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True,
-                 explore_steps=0, angrop_object=None, argv=None):
+                 explore_steps=0, angrop_object=None, argv=None, concrete_fs=False):
         """
         :param binary           : Path to the binary which crashed.
         :param crash            : String of input which crashed the binary.
@@ -152,6 +152,7 @@ class Crash(object):
                 mode='tracing',
                 add_options=add_options,
                 remove_options=remove_options,
+                concrete_fs=concrete_fs,
                 **kwargs
             )
             s.register_plugin('posix', SimSystemPosix(
