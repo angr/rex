@@ -330,14 +330,14 @@ def test_reconstraining():
 def test_cromu71():
     crash_input = b'3&\x1b\x17/\x12\x1b\x1e]]]]]]]]]]]]]]]]]]]]\n\x1e\x7f\xffC^\n'
 
-    binary = os.path.join(os.path.dirname(os.path.realpath(__file__)), './simplified_bin/simplified_cromu71')
+    binary = os.path.join(bin_location, "tests/cgc/simplified_CROMU_00071")
 
     # create format info for atoi
     format_infos = []
     format_infos.append(FormatInfoStrToInt(0x804C500, "based_atoi_signed_10", str_arg_num=0, base=10,
                                            base_arg=None, allows_negative=True))
 
-    crash = rex.Crash(binary, crash_input, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'cromu71'))
+    crash = rex.Crash(binary, crash_input, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'simplified_CROMU_00071'))
 
     # let's generate some exploits for it
     arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
