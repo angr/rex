@@ -304,26 +304,22 @@ def test_reconstraining():
     Test our ability to reconstrain
     """
 
-    crash_input = bytes.fromhex("101010101014431b371c3389313131301a73cc62516e491dd2f10bfa256e8c5577383b5dcf6bc645d295b4011493c0e5ed80ffffff0b7070c1ecc2f516a892f17abe0dd15eb17ff76624646f6f756d6590746174696f6eb770de07ed4352a3f8575ffc47e9aaa3c792f17abe0dd15eb17ff76624646f63756d877c26a90f839aa84386b0d86123f1ebb65586a794aef8355c3c252410bce1c41494adbe17ec7fd3f764b30fe3bb8187c7bd146462f5010000007f5713a610eda32f16a52226fb88fe0d2905ba2c98f48645786563757461626c652f6400631257e567ff227038ae0bb5242d61549eb9febc41cc0b347e7c7c7c7c7c7c7c7c7c7c7c7c7c7c997c7c7c73d6121b47383e2e72c363a4255a44bd17bec98097e8bd91cf27711ecf4edc02b6f031b170de07ed4352a310575ffc47e9aaa3c77ca565638510c0179e3911eb569ca90064cd2b48c977641ba395905373fd0b578175a210101014431b371c333700313130e7062cf5d2dd371b8cf2812fd823bd634f4240afba99bff3eee8494da1e7634bb4cf511771331b73cf16bb41aedd7c632d636763ede059ee4d9c6603d09fe58e25b36d8d40104b2e868be8e2f7fc446fd8ac83587f842ab06ab2f0b33afbd8bf47f7c29a1314d4b32af4b400026bec8650bfa7b0858c2ab155865318a80534f75b3384d8")
-
+    crash_input = b'3\x89111'+b'0'+b'A'*190+b'1'
 
     binary = os.path.join(bin_location, "tests/cgc/PIZZA_00003")
 
     crash = rex.Crash(binary, crash_input, fast_mode=True)
-    cp = crash.copy()
 
-    ptfi = list(cp.point_to_flag())
+    ptfi = list(crash.point_to_flag())
+    nose.tools.assert_true(len(ptfi) >= 2)
 
-    nose.tools.assert_true(len(ptfi) >= 1)
-
+    # test point to flag #1
     cg = colorguard.ColorGuard(binary, ptfi[0])
     x = cg.attempt_exploit()
-
     nose.tools.assert_not_equals(x, None)
     nose.tools.assert_true(_do_pov_test(x))
 
-    # test point to flag
-    nose.tools.assert_true(len(ptfi) >= 2)
+    # test point to flag #2
     cg = colorguard.ColorGuard(binary, ptfi[1])
     x = cg.attempt_exploit()
     nose.tools.assert_not_equals(x, None)
