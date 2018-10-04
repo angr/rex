@@ -5,6 +5,7 @@ from angr.state_plugins.trace_additions import FormatInfoIntToStr, FormatInfoStr
 
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
+cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
 
 import logging
 logging.getLogger("rex").setLevel("DEBUG")
@@ -36,7 +37,7 @@ def break_chall_resp_atoi():
     f1 = FormatInfoIntToStr(addr=itoa_addr, func_name="itoa", int_arg_num=1, str_dst_num=0, base=10, base_arg=None)
     f2 = FormatInfoStrToInt(addr=atoi_addr, func_name="atoi", str_arg_num=0, base=10, base_arg=None,
                             allows_negative=True)
-    crash = rex.Crash(bin_path, crash=crash_input, format_infos=[f1, f2])
+    crash = rex.Crash(bin_path, crash=crash_input, format_infos=[f1, f2], rop_cache_path=os.path.join(cache_location, "chall_resp_atoi"))
     exploit_f = crash.exploit()
     for e in exploit_f.register_setters:
         nose.tools.assert_true(_do_pov_test(e))
@@ -49,7 +50,8 @@ def test_chall_response():
                   b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
                   b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
                   b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
-    crash = rex.Crash(bin_location + "/tests/i386/overflow_after_challenge_response2", crash=crash_input)
+    crash = rex.Crash(bin_location + "/tests/i386/overflow_after_challenge_response2", crash=crash_input,
+			          rop_cache_path=os.path.join(cache_location, "overflow_after_challenge_response2"))
     exploit_f = crash.exploit()
     for e in exploit_f.register_setters:
         nose.tools.assert_true(_do_pov_test(e))
@@ -62,7 +64,8 @@ def test_chall_resp_rand():
                   b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
                   b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
                   b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
-    crash = rex.Crash(bin_location + "/tests/i386/overflow_after_chall_resp_rand", crash=crash_input)
+    crash = rex.Crash(bin_location + "/tests/i386/overflow_after_chall_resp_rand", crash=crash_input,
+			          rop_cache_path=os.path.join(cache_location, "overflow_after_chall_resp_rand"))
     exploit_f = crash.exploit()
     for e in exploit_f.register_setters:
         nose.tools.assert_true(_do_pov_test(e))

@@ -29,8 +29,9 @@ class Crash(object):
     """
 
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
-                 prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True,
-                 explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, trace_timeout=10):
+                 prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, fast_mode=False,
+                 explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, rop_cache_path=None,
+                 trace_timeout=10):
         """
         :param binary:              Path to the binary which crashed.
         :param crash:               String of input which crashed the binary.
@@ -74,7 +75,8 @@ class Crash(object):
         # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
         # hash binary contents for rop cache name
         binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
-        rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
+        if not rop_cache_path:
+            rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
 
         if use_rop:
             if angrop_object is not None:

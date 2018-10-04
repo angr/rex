@@ -3,13 +3,15 @@ import nose
 
 import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
+cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
 
 def test_write_what_where_shadowstack():
     """
     Test that our write what where exploit can leak, and works in the presence of a shadowstack
     """
     crash_str = b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
-    crash = rex.Crash(os.path.join(bin_location + "/tests/i386/write_what_where_shadow_stack"), crash_str)
+    crash = rex.Crash(os.path.join(bin_location + "/tests/i386/write_what_where_shadow_stack"), crash_str,
+			          rop_cache_path=os.path.join(cache_location, "write_what_where_shadow_stack"))
     arsenal = crash.exploit()
     exploit = arsenal.best_type2
     nose.tools.assert_true(exploit.test_binary())
