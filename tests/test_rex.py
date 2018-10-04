@@ -33,7 +33,7 @@ def test_legit_00001():
 
     crash = bytes.fromhex('1002000041414141414141414141414d41414141414141414141414141414141001041414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141412a4141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141604141414141414141414102ffffff410080ffff4141410d807f412641414141414141414141414141414141414141413b41415f414141412b41414141417f4141414141412441414141416041f8414141414141c1414139410010000200005541415f4141b9b9b9b1b9d4b9b9b9b99cb99ec4b9b9b941411f4141414141414114414141514141414141414141414141454141494141414141414141404141414141414d414124a0414571717171717171717171717171717171616161616161616161616161616161006161515e41414141412041414141412125414141304141492f41414141492f4141414541412c4141410037373737373737373737414141414141413a41c4b9b9b9b901b9413c41414141414141414141414141412133414141414141412f414141414141414164414141414141414141414141417f41414100010000000055414b4100124141414141414141')
 
-    crash = rex.Crash(os.path.join(bin_location, "tests/defcon24/legit_00001"), crash)
+    crash = rex.Crash(os.path.join(bin_location, "tests/defcon24/legit_00001"), crash, fast_mode=True)
 
     arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
 
@@ -52,7 +52,7 @@ def test_legit_00003():
     '''
 
     crash = b"1\n" + b"A" * 200
-    crash = rex.Crash(os.path.join(bin_location, "tests/defcon24/legit_00003"), crash)
+    crash = rex.Crash(os.path.join(bin_location, "tests/defcon24/legit_00003"), crash, fast_mode=True)
 
     nose.tools.assert_true(crash.explorable())
     nose.tools.assert_true(crash.one_of(Vulnerability.WRITE_WHAT_WHERE))
@@ -99,7 +99,7 @@ def test_shellcode_placement():
     '''
 
     crash = b"A" * 272
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/shellcode_tester"), crash)
+    crash = rex.Crash(os.path.join(bin_location, "tests/i386/shellcode_tester"), crash, fast_mode=True)
 
     arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
@@ -123,7 +123,7 @@ def test_boolector_solving():
     '''
 
     crash = b"A" * 64 * 4
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/add_payload"), crash)
+    crash = rex.Crash(os.path.join(bin_location, "tests/i386/add_payload"), crash, fast_mode=True)
 
     arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory'})
 
@@ -179,7 +179,7 @@ def test_linux_stacksmash():
     '''
 
     crash = b"A" * 227
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash)
+    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash, fast_mode=True)
     exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
     # make sure we're able to exploit it in all possible ways
@@ -198,7 +198,7 @@ def test_cgc_type1_rop_stacksmash():
 
     crash = bytes.fromhex("0500ffff80ffffff80f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1ffff80f1f1f1ebf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f100de7fff80ffffff800fffffff7ef3ffffffff7fffff80fffffeff09fefefefefe0a57656c63fe6d6520746f2850616c696e64726f6d65204669776465720a0affffffff80ffffe8800fffffff7f230a")
 
-    crash = rex.Crash(os.path.join(bin_location, "tests/cgc/sc1_0b32aa01_01"), crash)
+    crash = rex.Crash(os.path.join(bin_location, "tests/cgc/sc1_0b32aa01_01"), crash, fast_mode=True)
     arsenal = crash.exploit()
 
     # make sure we can control ecx, edx, ebx, ebp, esi, and edi with rop
@@ -221,7 +221,7 @@ def test_exploit_yielding():
 
     crash = bytes.fromhex("0500ffff80ffffff80f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1ffff80f1f1f1ebf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f100de7fff80ffffff800fffffff7ef3ffffffff7fffff80fffffeff09fefefefefe0a57656c63fe6d6520746f2850616c696e64726f6d65204669776465720a0affffffff80ffffe8800fffffff7f230a")
 
-    crash = rex.Crash(os.path.join(bin_location, "tests/cgc/sc1_0b32aa01_01"), crash)
+    crash = rex.Crash(os.path.join(bin_location, "tests/cgc/sc1_0b32aa01_01"), crash, fast_mode=True)
 
     leakers = 0
     register_setters = 0
@@ -237,7 +237,7 @@ def test_exploit_yielding():
 def _do_arbitrary_transmit_test_for(binary):
     crash_input = b"A"*0x24
     binary = os.path.join(bin_location, binary)
-    crash = rex.Crash(binary, crash_input)
+    crash = rex.Crash(binary, crash_input, fast_mode=True)
     zp = crash.state.get_plugin("zen_plugin")
     nose.tools.assert_true(len(zp.controlled_transmits) == 1)
 
@@ -309,7 +309,7 @@ def test_reconstraining():
 
     binary = os.path.join(bin_location, "tests/cgc/PIZZA_00003")
 
-    crash = rex.Crash(binary, crash_input)
+    crash = rex.Crash(binary, crash_input, fast_mode=True)
     cp = crash.copy()
 
     ptfi = list(cp.point_to_flag())
@@ -340,7 +340,7 @@ def test_cromu71():
     format_infos.append(FormatInfoStrToInt(0x804C500, "based_atoi_signed_10", str_arg_num=0, base=10,
                                            base_arg=None, allows_negative=True))
 
-    crash = rex.Crash(binary, crash_input)
+    crash = rex.Crash(binary, crash_input, fast_mode=True)
 
     # let's generate some exploits for it
     arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})

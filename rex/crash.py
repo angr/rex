@@ -80,7 +80,7 @@ class Crash(object):
             if angrop_object is not None:
                 self.rop = angrop_object
             else:
-                self.rop = self.project.analyses.ROP()
+                self.rop = self.project.analyses.ROP(fast_mode=fast_mode)
                 if rop_cache_tuple is not None:
                     l.info("loading rop gadgets from cache tuple")
                     self.rop._load_cache_tuple(rop_cache_tuple)
