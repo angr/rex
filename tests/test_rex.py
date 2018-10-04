@@ -331,9 +331,9 @@ def test_reconstraining():
 
 
 def test_cromu71():
-    crash_input = b'feq\n &\x06\x00\x80\xee\xeen\nf\x00f_E_p\x00\x00\x80\x00q\n3&\x1b\x17/\x12\x1b\x1e]]]]]]]]]]]]]]]]]]]]\n\x1e\x7f\xffC^\n'
+    crash_input = b'3&\x1b\x17/\x12\x1b\x1e]]]]]]]]]]]]]]]]]]]]\n\x1e\x7f\xffC^\n'
 
-    binary = os.path.join(bin_location, "tests/cgc/CROMU_00071")
+    binary = os.path.join(os.path.dirname(os.path.realpath(__file__)), './simplified_bin/simplified_cromu71')
 
     # create format info for atoi
     format_infos = []
