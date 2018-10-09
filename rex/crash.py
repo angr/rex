@@ -72,7 +72,6 @@ class Crash(object):
         self.hooks = {} if hooks is None else hooks
         self.explore_steps = explore_steps
         self.use_crash_input = use_crash_input
-        self._c = None
 
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
@@ -206,11 +205,7 @@ class Crash(object):
                 save_unconstrained=r.crash_mode
             )
 
-            self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2)
-            if r.crash_mode:
-                self._c = angr.exploration_techniques.CrashMonitor(trace=r.trace,
-                                                                   crash_addr=r.crash_addr)
-                simgr.use_technique(self._c)
+            self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2, crash_addr=r.crash_addr)
             simgr.use_technique(self._t)
             simgr.use_technique(angr.exploration_techniques.Oppologist())
 
@@ -615,7 +610,6 @@ class Crash(object):
         cp.flag_mem = self.flag_mem.copy()
         cp.crash_types = self.crash_types
         cp._t = self._t
-        cp._c = self._c
         cp.violating_action = self.violating_action
         cp.use_crash_input = self.use_crash_input
         cp.explore_steps = self.explore_steps
@@ -739,9 +733,9 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        if hasattr(self, '_c') and self._c is not None:
-            recent_actions = reversed(self._c.last_state.history.recent_actions)
-            state = self._c.last_state
+        if self._t.last_state is not None:
+            recent_actions = reversed(self._t.last_state.history.recent_actions)
+            state = self._t.last_state
         else:
             recent_actions = reversed(self.state.history.actions)
             state = self.state

@@ -1,24 +1,19 @@
-import rex
+import os
+import sys
 import nose
-from nose.plugins.attrib import attr
 import struct
+import logging
+from nose.plugins.attrib import attr
+
+import rex
 import colorguard
 from rex.vulnerability import Vulnerability
 from angr.state_plugins.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt, FormatInfoDontConstrain
 
-
-import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
 tests_dir = str(os.path.dirname(os.path.realpath(__file__)))
 
-import logging
-logging.getLogger("rex").setLevel("DEBUG")
-logging.getLogger("povsim").setLevel("DEBUG")
-logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
-logging.getLogger("angr.simos").setLevel("DEBUG")
-logging.getLogger("angr.exploration_techniques.tracer").setLevel("DEBUG")
-logging.getLogger("angr.exploration_techniques.crash_monitor").setLevel("DEBUG")
 
 def _do_pov_test(pov, enable_randomness=True):
     ''' Test a POV '''
@@ -28,9 +23,7 @@ def _do_pov_test(pov, enable_randomness=True):
     return False
 
 def test_legit_00001():
-    '''
-    Test exploitation of legit_00001 given a good crash.
-    '''
+    # Test exploitation of legit_00001 given a good crash.
 
     crash = bytes.fromhex('1002000041414141414141414141414d41414141414141414141414141414141001041414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141412a4141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141604141414141414141414102ffffff410080ffff4141410d807f412641414141414141414141414141414141414141413b41415f414141412b41414141417f4141414141412441414141416041f8414141414141c1414139410010000200005541415f4141b9b9b9b1b9d4b9b9b9b99cb99ec4b9b9b941411f4141414141414114414141514141414141414141414141454141494141414141414141404141414141414d414124a0414571717171717171717171717171717171616161616161616161616161616161006161515e41414141412041414141412125414141304141492f41414141492f4141414541412c4141410037373737373737373737414141414141413a41c4b9b9b9b901b9413c41414141414141414141414141412133414141414141412f414141414141414164414141414141414141414141417f41414100010000000055414b4100124141414141414141')
 
@@ -49,9 +42,7 @@ def test_legit_00001():
         nose.tools.assert_true(_do_pov_test(leaker))
 
 def test_legit_00003():
-    '''
-    Test exploration and exploitation fo legit_00003.
-    '''
+    # Test exploration and exploitation of legit_00003.
 
     crash = b"1\n" + b"A" * 200
     crash = rex.Crash(os.path.join(bin_location, "tests/defcon24/legit_00003"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'legit_00003'))
@@ -73,9 +64,7 @@ def test_legit_00003():
         nose.tools.assert_true(_do_pov_test(leaker))
 
 def break_controlled_printf():#L90
-    '''
-    Test ability to turn controlled format string into Type 2 POV.
-    '''
+    # Test ability to turn controlled format string into Type 2 POV.
 
     crash = "%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%X%x%sAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     binary = os.path.join(bin_location, "tests/i386/controlled_printf")
@@ -96,9 +85,7 @@ def break_controlled_printf():#L90
     nose.tools.assert_true(_do_pov_test(pov, enable_randomness=False))
 
 def test_shellcode_placement():
-    '''
-    Test that shellcode is placed in only executable memory regions.
-    '''
+    # Test that shellcode is placed in only executable memory regions.
 
     crash = b"A" * 272
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/shellcode_tester"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'shellcode_tester'))
@@ -120,9 +107,7 @@ def test_shellcode_placement():
     nose.tools.assert_equal(sorted(exec_regions), sorted([0xb7ffb000, 0xbaaaaeec]))
 
 def test_boolector_solving():
-    '''
-    Test boolector's ability to generate the correct values at pov runtime.
-    '''
+    # Test boolector's ability to generate the correct values at pov runtime.
 
     crash = b"A" * 64 * 4
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/add_payload"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'add_payload'))
@@ -139,9 +124,7 @@ def test_boolector_solving():
         nose.tools.assert_true(_do_pov_test(leaker))
 
 def break_cpp_vptr_smash():#L165
-    '''
-    Test detection of 'arbitrary-read' vulnerability type, exploration of the crash, and exploitation post-exploration
-    '''
+    # Test detection of 'arbitrary-read' vulnerability type, exploration of the crash, and exploitation post-exploration
 
     crash = b"A" * 512
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_vptr_smash"), crash, rop_cache_path=os.path.join(cache_location, 'vuln_vptr_smash'))
@@ -175,10 +158,8 @@ def break_cpp_vptr_smash():#L165
         nose.tools.assert_true(_do_pov_test(leaker))
 
 def test_linux_stacksmash():
-    '''
-    Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
-    ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
-    '''
+    # Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
+    # ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
 
     crash = b"A" * 227
     crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'))
@@ -193,10 +174,8 @@ def test_linux_stacksmash():
     # TODO test exploit with pwntool's 'process'
 
 def test_cgc_type1_rop_stacksmash():
-    '''
-    Test creation of type1 exploit on 0b32aa01_01 ('Palindrome') with rop. The vulnerability exposed by the string `crash` is
-    stack buffer overflow. This testcase should exercise rex exploiting stack-based buffer overflows with rop.
-    '''
+    # Test creation of type1 exploit on 0b32aa01_01 ('Palindrome') with rop. The vulnerability exposed by the string `crash` is
+    # stack buffer overflow. This testcase should exercise rex exploiting stack-based buffer overflows with rop.
 
     crash = bytes.fromhex("0500ffff80ffffff80f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1ffff80f1f1f1ebf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f100de7fff80ffffff800fffffff7ef3ffffffff7fffff80fffffeff09fefefefefe0a57656c63fe6d6520746f2850616c696e64726f6d65204669776465720a0affffffff80ffffe8800fffffff7f230a")
 
@@ -217,9 +196,7 @@ def test_cgc_type1_rop_stacksmash():
 
 
 def test_exploit_yielding():
-    '''
-    Test the yielding of exploits
-    '''
+    # Test the yielding of exploits
 
     crash = bytes.fromhex("0500ffff80ffffff80f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1ffff80f1f1f1ebf1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f100de7fff80ffffff800fffffff7ef3ffffffff7fffff80fffffeff09fefefefefe0a57656c63fe6d6520746f2850616c696e64726f6d65204669776465720a0affffffff80ffffe8800fffffff7f230a")
 
@@ -258,15 +235,12 @@ def _do_arbitrary_transmit_test_for(binary):
             raise Exception("should be exploitable")
 
 def test_arbitrary_transmit():
-    """
-    Test our ability to exploit an arbitrary transmit
-    """
+    # Test our ability to exploit an arbitrary transmit
     _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit")
 
 def break_KPRCA_00057(): # L284
-    """
-    This test requires pointing an arbitrary transmit using atoi at the flag
-    """
+    # This test requires pointing an arbitrary transmit using atoi at the flag
+
     with open(os.path.join(tests_dir, "KPRCA_00057_crash"), 'rb') as f:
         crash = f.read()
 
@@ -296,15 +270,12 @@ def break_KPRCA_00057(): # L284
     nose.tools.assert_true(_do_pov_test(pov))
 
 def test_arbitrary_transmit_no_crash():
-    """
-    Test our ability to exploit an arbitrary transmit which does not cause a crash
-    """
+    # Test our ability to exploit an arbitrary transmit which does not cause a crash
+
     _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit_no_crash")
 
 def test_reconstraining():
-    """
-    Test our ability to reconstrain
-    """
+    # Test our ability to reconstrain
 
     crash_input = b'3\x89111'+b'0'+b'A'*190+b'1'
 
@@ -347,9 +318,7 @@ def test_cromu71():
     nose.tools.assert_true(_do_pov_test(arsenal.best_type1))
 
 def test_quick_triage():
-    '''
-    Test our ability to triage crashes quickly.
-    '''
+    # Test our ability to triage crashes quickly.
 
     crash_tuples = [
             (bytes.fromhex("1002000041414141414141414141414d41414141414141414141414141414141001041414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141412a4141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141604141414141414141414102ffffff410080ffff4141410d807f412641414141414141414141414141414141414141413b41415f414141412b41414141417f4141414141412441414141416041f8414141414141c1414139410010000200005541415f4141b9b9b9b1b9d4b9b9b9b99cb99ec4b9b9b941411f4141414141414114414141514141414141414141414141454141494141414141414141404141414141414d414124a0414571717171717171717171717171717171616161616161616161616161616161006161515e41414141412041414141412125414141304141492f41414141492f4141414541412c4141410037373737373737373737414141414141413a41c4b9b9b9b901b9413c41414141414141414141414141412133414141414141412f414141414141414164414141414141414141414141417f41414100010000000055414b4100124141414141414141"), "tests/defcon24/legit_00001", Vulnerability.IP_OVERWRITE),
@@ -378,7 +347,13 @@ def run_all():
             all_functions[f]()
 
 if __name__ == "__main__":
-    import sys
+    logging.getLogger("rex").setLevel("DEBUG")
+    logging.getLogger("povsim").setLevel("DEBUG")
+    logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
+    logging.getLogger("angr.simos").setLevel("DEBUG")
+    logging.getLogger("angr.exploration_techniques.tracer").setLevel("DEBUG")
+    logging.getLogger("angr.exploration_techniques.crash_monitor").setLevel("DEBUG")
+
     if len(sys.argv) > 1:
         globals()['test_' + sys.argv[1]]()
     else:
