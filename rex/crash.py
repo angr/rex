@@ -10,13 +10,21 @@ import random
 import tracer
 import hashlib
 import operator
-from rex.exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
-from rex.vulnerability import Vulnerability
+from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
+from .vulnerability import Vulnerability
+from .network_feeder import NetworkFeeder
 from angr import sim_options as so
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
 from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
+
+
+class CrashInputType:
+    STDIN = 0
+    POV_FILE = 1
+    TCP = 2
+    UDP = 3
 
 
 class NonCrashingInput(Exception):
@@ -31,7 +39,8 @@ class Crash(object):
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, fast_mode=False,
                  explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, rop_cache_path=None,
-                 trace_timeout=10):
+                 trace_timeout=10, input_type=CrashInputType.STDIN, port=None,
+                 ):
         """
         :param binary:              Path to the binary which crashed.
         :param crash:               String of input which crashed the binary.
@@ -140,7 +149,14 @@ class Crash(object):
             else:
                 input_data = self.crash
 
+            if input_type == CrashInputType.TCP:
+                # Feed input to the QEMURunner
+                _ = NetworkFeeder("tcp", "localhost", port, input_data)
+            elif input_type == CrashInputType.UDP:
+                raise NotImplementedError()
+
             r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv, trace_timeout=trace_timeout)
+            import ipdb; ipdb.set_trace()
 
             kwargs = {}
             if self.project.loader.main_object.os == 'cgc':
@@ -156,6 +172,12 @@ class Crash(object):
             else:
                 raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
 
+            socket_queue = None
+            if input_type == CrashInputType.TCP:
+                input_sock = SimFileStream("in", content=input_data)
+                output_sock = SimFileStream("out")
+                socket_queue = [ None, (input_sock, output_sock)]
+
             s = self.project.factory.full_init_state(
                 mode='tracing',
                 add_options=add_options,
@@ -170,6 +192,7 @@ class Crash(object):
                 argv=s.posix.argv,
                 environ=s.posix.environ,
                 auxv=s.posix.auxv,
+                socket_queue=socket_queue,
             ))
             s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
             s.preconstrainer.preconstrain_file(input_data, s.posix.stdin, True)
