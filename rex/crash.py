@@ -156,7 +156,6 @@ class Crash(object):
                 raise NotImplementedError()
 
             r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv, trace_timeout=trace_timeout)
-            import ipdb; ipdb.set_trace()
 
             kwargs = {}
             if self.project.loader.main_object.os == 'cgc':
