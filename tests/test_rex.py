@@ -309,7 +309,7 @@ def test_reconstraining():
 
     binary = os.path.join(bin_location, "tests/cgc/PIZZA_00003")
 
-    crash = rex.Crash(binary, crash_input, fast_mode=True)
+    crash = rex.Crash(binary, crash_input, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'PIZZA_00003'))
 
     ptfi = list(crash.point_to_flag())
     nose.tools.assert_true(len(ptfi) >= 2)
