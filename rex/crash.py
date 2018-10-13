@@ -39,7 +39,7 @@ class Crash(object):
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, fast_mode=False,
                  explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, rop_cache_path=None,
-                 trace_timeout=10, input_type=CrashInputType.STDIN, port=None,
+                 trace_timeout=10, input_type=CrashInputType.STDIN, port=None, use_crash_input=False
                  ):
         """
         :param binary:              Path to the binary which crashed.
@@ -71,6 +71,7 @@ class Crash(object):
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.hooks = {} if hooks is None else hooks
         self.explore_steps = explore_steps
+        self.use_crash_input = use_crash_input
         self._c = None
 
         if self.explore_steps > 10:
@@ -616,6 +617,7 @@ class Crash(object):
         cp._t = self._t
         cp._c = self._c
         cp.violating_action = self.violating_action
+        cp.use_crash_input = self.use_crash_input
         cp.explore_steps = self.explore_steps
         cp.constrained_addrs = list(self.constrained_addrs)
 
