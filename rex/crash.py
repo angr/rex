@@ -31,7 +31,7 @@ class NonCrashingInput(Exception):
     pass
 
 
-class Crash(object):
+class Crash:
     """
     Triage a crash using angr.
     """
@@ -39,7 +39,7 @@ class Crash(object):
     def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, fast_mode=False,
                  explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, rop_cache_path=None,
-                 trace_timeout=10, input_type=CrashInputType.STDIN, port=None, use_crash_input=False
+                 trace_timeout=10, input_type=CrashInputType.STDIN, port=None, use_crash_input=False, tracer_args=None,
                  ):
         """
         :param binary:              Path to the binary which crashed.
@@ -72,6 +72,9 @@ class Crash(object):
         self.hooks = {} if hooks is None else hooks
         self.explore_steps = explore_steps
         self.use_crash_input = use_crash_input
+
+        if tracer_args is None:
+            tracer_args = {}
 
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
@@ -133,8 +136,8 @@ class Crash(object):
             # optimized crash check
             if self.project.loader.main_object.os == 'cgc':
 
-                if not tracer.QEMURunner(binary, input=self.crash).crash_mode:
-                    if not tracer.QEMURunner(binary, input=self.crash, report_bad_args=True).crash_mode:
+                if not tracer.QEMURunner(binary, input=self.crash, **tracer_args).crash_mode:
+                    if not tracer.QEMURunner(binary, input=self.crash, report_bad_args=True, **tracer_args).crash_mode:
                         l.warning("input did not cause a crash")
                         raise NonCrashingInput
 
@@ -155,7 +158,7 @@ class Crash(object):
             elif input_type == CrashInputType.UDP:
                 raise NotImplementedError()
 
-            r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv, trace_timeout=trace_timeout)
+            r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv, trace_timeout=trace_timeout, **tracer_args)
 
             kwargs = {}
             if self.project.loader.main_object.os == 'cgc':
@@ -352,7 +355,7 @@ class Crash(object):
         elif self.one_of([Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]):
             self._explore_arbitrary_write(path_file)
         else:
-            raise CannotExplore("unknown explorable crash type: %s", self.crash_types)
+            raise CannotExplore("unknown explorable crash type: %s" % self.crash_types)
 
     def point_to_flag(self):
         '''
@@ -380,7 +383,6 @@ class Crash(object):
                 yield ChallRespInfo.atoi_dumps(cp)
             except CannotExploit:
                 l.warning("crash couldn't be pointed at flag skipping")
-                pass
 
         # look for contiguous flag bytes of length 4 or longer and try to leak only one
         max_tries = 20
@@ -407,7 +409,6 @@ class Crash(object):
                         return
                     except CannotExploit:
                         l.warning("crash couldn't be pointed at flag skipping")
-                        pass
 
     @staticmethod
     def _four_flag_bytes_offset(ast):
@@ -733,9 +734,10 @@ class Crash(object):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        if self._t.last_state is not None:
+        if self._t is not None and self._t.last_state is not None:
             recent_actions = reversed(self._t.last_state.history.recent_actions)
             state = self._t.last_state
+            # TODO: this is a dead assignment! what was this supposed to be?
         else:
             recent_actions = reversed(self.state.history.actions)
             state = self.state
@@ -769,7 +771,7 @@ class Crash(object):
 
         return
 
-class QuickCrash(object):
+class QuickCrash:
 
     def __init__(self, binary, crash, argv=None):
         """

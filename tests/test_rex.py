@@ -3,12 +3,11 @@ import sys
 import nose
 import struct
 import logging
-from nose.plugins.attrib import attr
 
 import rex
 import colorguard
 from rex.vulnerability import Vulnerability
-from angr.state_plugins.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt, FormatInfoDontConstrain
+from angr.state_plugins.trace_additions import FormatInfoStrToInt, FormatInfoDontConstrain
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
@@ -162,7 +161,9 @@ def test_linux_stacksmash():
     # ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
 
     crash = b"A" * 227
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'))
+    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'),
+            tracer_args={'ld_linux': os.path.join(bin_location, 'tests/i386/ld-linux.so.2'),
+                'library_path': os.path.join(bin_location, 'tests/i386')})
     exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
     # make sure we're able to exploit it in all possible ways
