@@ -177,9 +177,9 @@ class Crash:
 
             socket_queue = None
             if input_type == CrashInputType.TCP:
-                input_sock = SimFileStream("in", content=input_data)
+                input_sock = SimFileStream("in")
                 output_sock = SimFileStream("out")
-                socket_queue = [ None, (input_sock, output_sock)]
+                socket_queue = [ None, None, None, (input_sock, output_sock) ]
 
             s = self.project.factory.full_init_state(
                 mode='tracing',
@@ -198,7 +198,12 @@ class Crash:
                 socket_queue=socket_queue,
             ))
             s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-            s.preconstrainer.preconstrain_file(input_data, s.posix.stdin, True)
+            if input_type == CrashInputType.TCP:
+                # preconstrain input_sock
+                s.preconstrainer.preconstrain_file(input_data, input_sock, set_length=True)
+            else:
+                # preconstrain stdin
+                s.preconstrainer.preconstrain_file(input_data, s.posix.stdin, set_length=True)
             if cgc:
                 s.preconstrainer.preconstrain_flag_page(r.magic)
 
