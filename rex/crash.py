@@ -207,6 +207,12 @@ class Crash:
             if cgc:
                 s.preconstrainer.preconstrain_flag_page(r.magic)
 
+            # Loosen certain libc limits on symbolic input
+            s.libc.buf_symbolic_bytes = 3000
+            s.libc.max_symbolic_strchr = 3000
+            s.libc.max_str_len = 3000
+            s.libc.max_buffer_size = 16384
+
             simgr = self.project.factory.simulation_manager(
                 s,
                 save_unsat=True,
