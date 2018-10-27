@@ -73,6 +73,7 @@ class Crash:
         self.explore_steps = explore_steps
         self.use_crash_input = use_crash_input
         self.input_type = input_type
+        self.initial_state = None
 
         if tracer_args is None:
             tracer_args = {}
@@ -222,6 +223,8 @@ class Crash:
                 hierarchy=False,
                 save_unconstrained=r.crash_mode
             )
+
+            self.initial_state = s
 
             self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2, crash_addr=r.crash_addr)
             simgr.use_technique(self._t)
@@ -654,9 +657,10 @@ class Crash:
             return control
 
         sp = self.state.solver.eval(self.state.regs.sp)
+        sp_base = self.initial_state.solver.eval(self.initial_state.regs.sp)
         for addr in self.symbolic_mem:
             # discard our fake heap etc
-            if addr > self.project.arch.initial_sp:
+            if addr > sp_base:
                 continue
 
             # if the region is below sp it gets added
@@ -679,6 +683,7 @@ class Crash:
         cp.aslr = self.aslr
         cp.prev = self.prev.copy()
         cp.state = self.state.copy()
+        cp.initial_state = self.initial_state
         cp.rop = self.rop
         cp.added_actions = list(self.added_actions)
         cp.symbolic_mem = self.symbolic_mem.copy()
