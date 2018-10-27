@@ -219,7 +219,7 @@ class Crash:
 
             simgr = self.project.factory.simulation_manager(
                 s,
-                save_unsat=True,
+                save_unsat=False,
                 hierarchy=False,
                 save_unconstrained=r.crash_mode
             )
