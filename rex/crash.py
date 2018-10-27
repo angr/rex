@@ -40,7 +40,7 @@ class Crash:
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, fast_mode=False,
                  explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, rop_cache_path=None,
                  trace_timeout=10, input_type=CrashInputType.STDIN, port=None, use_crash_input=False, tracer_args=None,
-                 ):
+                 initial_state=None):
         """
         :param binary:              Path to the binary which crashed.
         :param crash:               String of input which crashed the binary.
@@ -73,7 +73,7 @@ class Crash:
         self.explore_steps = explore_steps
         self.use_crash_input = use_crash_input
         self.input_type = input_type
-        self.initial_state = None
+        self.initial_state = initial_state
 
         if tracer_args is None:
             tracer_args = {}
@@ -189,42 +189,43 @@ class Crash:
             else:
                 input_file = stdin_file = SimFileStream(name='stdin', ident='aeg_stdin')
 
-            s = self.project.factory.full_init_state(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options,
-                **kwargs
-            )
-            s.register_plugin('posix', SimSystemPosix(
-                stdin=stdin_file,
-                stdout=SimFileStream(name='stdout'),
-                stderr=SimFileStream(name='stderr'),
-                argc=s.posix.argc,
-                argv=s.posix.argv,
-                environ=s.posix.environ,
-                auxv=s.posix.auxv,
-                socket_queue=socket_queue,
-            ))
+            if initial_state is None:
+                initial_state = self.project.factory.full_init_state(
+                    mode='tracing',
+                    add_options=add_options,
+                    remove_options=remove_options,
+                    **kwargs
+                )
+                initial_state.register_plugin('posix', SimSystemPosix(
+                    stdin=stdin_file,
+                    stdout=SimFileStream(name='stdout'),
+                    stderr=SimFileStream(name='stderr'),
+                    argc=initial_state.posix.argc,
+                    argv=initial_state.posix.argv,
+                    environ=initial_state.posix.environ,
+                    auxv=initial_state.posix.auxv,
+                    socket_queue=socket_queue,
+                ))
 
-            s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-            s.preconstrainer.preconstrain_file(input_data, input_file, set_length=True)
-            if cgc:
-                s.preconstrainer.preconstrain_flag_page(r.magic)
+                initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+                initial_state.preconstrainer.preconstrain_file(input_data, input_file, set_length=True)
+                if cgc:
+                    initial_state.preconstrainer.preconstrain_flag_page(r.magic)
 
-            # Loosen certain libc limits on symbolic input
-            s.libc.buf_symbolic_bytes = 3000
-            s.libc.max_symbolic_strchr = 3000
-            s.libc.max_str_len = 3000
-            s.libc.max_buffer_size = 16384
+                # Loosen certain libc limits on symbolic input
+                initial_state.libc.buf_symbolic_bytes = 3000
+                initial_state.libc.max_symbolic_strchr = 3000
+                initial_state.libc.max_str_len = 3000
+                initial_state.libc.max_buffer_size = 16384
 
             simgr = self.project.factory.simulation_manager(
-                s,
+                initial_state,
                 save_unsat=False,
                 hierarchy=False,
                 save_unconstrained=r.crash_mode
             )
 
-            self.initial_state = s
+            self.initial_state = initial_state
 
             self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2, crash_addr=r.crash_addr)
             simgr.use_technique(self._t)
