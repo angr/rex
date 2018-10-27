@@ -1,23 +1,23 @@
-import logging
-
-from tracer import TracerPoV
-
-l = logging.getLogger("rex.Crash")
-
 import os
 import angr
 import random
 import tracer
 import hashlib
+import logging
 import operator
-from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
-from .vulnerability import Vulnerability
-from .network_feeder import NetworkFeeder
+
 from angr import sim_options as so
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
 from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
+from tracer import TracerPoV
+
+from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
+from .vulnerability import Vulnerability
+from .network_feeder import NetworkFeeder
+
+l = logging.getLogger("rex.Crash")
 
 
 class CrashInputType:
@@ -72,6 +72,7 @@ class Crash:
         self.hooks = {} if hooks is None else hooks
         self.explore_steps = explore_steps
         self.use_crash_input = use_crash_input
+        self.input_type = input_type
 
         if tracer_args is None:
             tracer_args = {}
@@ -114,6 +115,8 @@ class Crash:
             self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
         self.os = self.project.loader.main_object.os
+        if self.os.startswith('UNIX'):
+            self.os = 'unix'
 
         # determine the aslr of a given os and arch
         if aslr is None:
@@ -135,8 +138,7 @@ class Crash:
             # faster place to check for non-crashing inputs
 
             # optimized crash check
-            if self.project.loader.main_object.os == 'cgc':
-
+            if self.os == 'cgc':
                 if not tracer.QEMURunner(binary, input=self.crash, **tracer_args).crash_mode:
                     if not tracer.QEMURunner(binary, input=self.crash, report_bad_args=True, **tracer_args).crash_mode:
                         l.warning("input did not cause a crash")
@@ -176,10 +178,15 @@ class Crash:
                 raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
 
             socket_queue = None
+            stdin_file = None # the file that will be fd 0
+            input_file = None # the file that we want to preconstrain
+
             if input_type == CrashInputType.TCP:
-                input_sock = SimFileStream("in")
-                output_sock = SimFileStream("out")
-                socket_queue = [ None, None, None, (input_sock, output_sock) ]
+                input_file = input_sock = SimFileStream(name="aeg_tcp_in", ident='aeg_stdin')
+                output_sock = SimFileStream(name="aeg_tcp_out")
+                socket_queue = [ None, None, None, (input_sock, output_sock) ] # FIXME THIS IS A HACK
+            else:
+                input_file = stdin_file = SimFileStream(name='stdin', ident='aeg_stdin')
 
             s = self.project.factory.full_init_state(
                 mode='tracing',
@@ -188,7 +195,7 @@ class Crash:
                 **kwargs
             )
             s.register_plugin('posix', SimSystemPosix(
-                stdin=SimFileStream(name='stdin', ident='aeg_stdin'),
+                stdin=stdin_file,
                 stdout=SimFileStream(name='stdout'),
                 stderr=SimFileStream(name='stderr'),
                 argc=s.posix.argc,
@@ -197,13 +204,9 @@ class Crash:
                 auxv=s.posix.auxv,
                 socket_queue=socket_queue,
             ))
+
             s.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-            if input_type == CrashInputType.TCP:
-                # preconstrain input_sock
-                s.preconstrainer.preconstrain_file(input_data, input_sock, set_length=True)
-            else:
-                # preconstrain stdin
-                s.preconstrainer.preconstrain_file(input_data, s.posix.stdin, set_length=True)
+            s.preconstrainer.preconstrain_file(input_data, input_file, set_length=True)
             if cgc:
                 s.preconstrainer.preconstrain_flag_page(r.magic)
 
@@ -264,7 +267,7 @@ class Crash:
         memory_writes = sorted(self.state.memory.mem.get_symbolic_addrs())
         l.debug("filtering writes")
         memory_writes = [m for m in memory_writes if m//0x1000 != 0x4347c]
-        user_writes = [m for m in memory_writes if any("stdin" in v for v in self.state.memory.load(m, 1).variables)]
+        user_writes = [m for m in memory_writes if any("aeg_stdin" in v for v in self.state.memory.load(m, 1).variables)]
         flag_writes = [m for m in memory_writes if any(v.startswith("cgc-flag") for v in self.state.memory.load(m, 1).variables)]
         l.debug("done filtering writes")
 
@@ -321,6 +324,12 @@ class Crash:
                 kwargs["blacklist_techniques"].add("explore_for_exploit")
             else:
                 kwargs["blacklist_techniques"] = {"explore_for_exploit"}
+
+        if self.input_type == CrashInputType.TCP:
+            opts = kwargs.get('shellcode_opts', {})
+            opts['default'] = 'dupsh'
+            opts['shellcode_args'] = {'fd': next(fd for fd in self.state.posix.fd if self.state.posix.fd[fd].read_storage.ident == 'aeg_stdin')}
+            kwargs['shellcode_opts'] = opts
 
         if self.os == 'cgc':
             exploit = CGCExploitFactory(self, **kwargs)
@@ -608,6 +617,59 @@ class Crash:
                 use_rop=use_rop,
                 angrop_object=self.rop)
 
+    def memory_control(self):
+        """
+        determine what symbolic memory we control which is at a constant address
+
+        TODO: be able to specify that we want to know about things relative to a certain address
+
+        :return:        A mapping from address to length of data controlled at that address
+        """
+
+        control = { }
+
+        # PIE binaries will give no global control without knowledge of the binary base
+        if self.project.loader.main_object.pic:
+            return control
+
+        min_addr = self.project.loader.main_object.min_addr
+        max_addr = self.project.loader.main_object.max_addr
+        for addr in self.symbolic_mem:
+            if addr >= min_addr and addr < max_addr:
+                control[addr] = self.symbolic_mem[addr]
+
+        return control
+
+    def stack_control(self):
+        """
+        determine what symbolic memory we control equal to or beneath the stack pointer
+
+        :return:        A mapping from address to length of data controlled at that address
+        """
+
+        control = { }
+
+        if self.state.solver.symbolic(self.state.regs.sp):
+            l.warning("detected symbolic sp when gauging stack control")
+            return control
+
+        sp = self.state.solver.eval(self.state.regs.sp)
+        for addr in self.symbolic_mem:
+            # discard our fake heap etc
+            if addr > self.project.arch.initial_sp:
+                continue
+
+            # if the region is below sp it gets added
+            elif addr > sp:
+                control[addr] = self.symbolic_mem[addr]
+
+            # if sp falls into the region it gets added starting at sp
+            elif addr + self.symbolic_mem[addr] > sp:
+                control[sp] = addr + self.symbolic_mem[addr] - sp
+
+        return control
+
+
     def copy(self):
         cp = Crash.__new__(Crash)
         cp.binary = self.binary
@@ -663,6 +725,12 @@ class Crash:
 
     @staticmethod
     def _segment(memory_writes):
+        """
+        Given a set of addresses, group into a dict mapping from address to length
+
+        :param Iterable memory_writes:   Addresses in memory
+        :return dict:               A map from start address to the length of continuous addresses after the start
+        """
         segments = { }
         memory_writes = sorted(memory_writes)
 
@@ -714,7 +782,7 @@ class Crash:
 
         # any arbitrary receives or transmits
         # TODO: receives
-        zp = self.state.get_plugin('zen_plugin') if self.project.loader.main_object.os == 'cgc' else None
+        zp = self.state.get_plugin('zen_plugin') if self.os == 'cgc' else None
         if zp is not None and len(zp.controlled_transmits):
             l.debug("detected arbitrary transmit vulnerability")
             self.crash_types.append(Vulnerability.ARBITRARY_TRANSMIT)
