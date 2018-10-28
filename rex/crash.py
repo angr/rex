@@ -16,15 +16,9 @@ from tracer import TracerPoV
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from .vulnerability import Vulnerability
 from .network_feeder import NetworkFeeder
+from .enums import CrashInputType
 
 l = logging.getLogger("rex.Crash")
-
-
-class CrashInputType:
-    STDIN = 0
-    POV_FILE = 1
-    TCP = 2
-    UDP = 3
 
 
 class NonCrashingInput(Exception):
@@ -679,6 +673,7 @@ class Crash:
         cp = Crash.__new__(Crash)
         cp.binary = self.binary
         cp.crash = self.crash
+        cp.input_type = self.input_type
         cp.project = self.project
         cp.os = self.os
         cp.aslr = self.aslr
