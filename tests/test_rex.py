@@ -1,6 +1,7 @@
 import os
 import sys
 import nose
+import flaky
 import struct
 import logging
 
@@ -318,6 +319,7 @@ def test_cromu71():
     # make sure it works
     nose.tools.assert_true(_do_pov_test(arsenal.best_type1))
 
+@flaky.flaky(3, 1)
 def test_quick_triage():
     # Test our ability to triage crashes quickly.
 
