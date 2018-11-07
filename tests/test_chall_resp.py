@@ -1,6 +1,7 @@
 import rex
 import angr
 import nose
+import flaky
 from angr.state_plugins.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt
 
 import os
@@ -58,7 +59,7 @@ def test_chall_response():
     for e in exploit_f.leakers:
         nose.tools.assert_true(_do_pov_test(e))
 
-
+@flaky.flaky(3, 1)
 def test_chall_resp_rand():
     crash_input = b" (((" \
                   b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
