@@ -5,6 +5,7 @@ import flaky
 import struct
 import logging
 
+import archr
 import rex
 import colorguard
 from rex.vulnerability import Vulnerability
@@ -84,27 +85,40 @@ def break_controlled_printf():#L90
 
     nose.tools.assert_true(_do_pov_test(pov, enable_randomness=False))
 
+def setup_module():
+    os.system("cd %s/tests/i386; ./build_all.sh" % bin_location)
+    
+
 def test_shellcode_placement():
+    setup_module()
+    
     # Test that shellcode is placed in only executable memory regions.
 
     crash = b"A" * 272
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/shellcode_tester"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'shellcode_tester'))
 
-    arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
+    with archr.targets.DockerImageTarget('angr-test:shellcode_tester').build() as t:
+    
+        crash = rex.Crash(t, os.path.join(bin_location, "tests/i386/shellcode_tester/shellcode_tester"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'shellcode_tester'))
 
-    exploit = arsenal.register_setters[0]
+        arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
-    # make sure the shellcode was placed into the executable heap page
-    heap_top = crash.state.solver.eval(crash.state.cgc.allocation_base)
-    nose.tools.assert_equal(struct.unpack("<I", exploit._raw_payload[-4:])[0] & 0xfffff000, heap_top)
+        exploit = arsenal.register_setters[0]
 
-    exec_regions = list(filter(lambda a: crash.state.solver.eval(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem))
+        # make sure the shellcode was placed into the executable heap page
+        heap_top = crash.state.solver.eval(crash.state.cgc.allocation_base)
+        nose.tools.assert_equal(struct.unpack("<I", exploit._raw_payload[-4:])[0] & 0xfffff000, heap_top)
 
-    # should just be two executable regions
-    nose.tools.assert_equal(len(exec_regions), 2)
+        exec_regions = list(filter(lambda a: crash.state.solver.eval(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem))
 
-    # only executable regions should be that one heap page and the stack, despite having more heap control and global control
-    nose.tools.assert_equal(sorted(exec_regions), sorted([0xb7ffb000, 0xbaaaaeec]))
+        crash.project.close()
+        
+        # should just be two executable regions
+        nose.tools.assert_equal(len(exec_regions), 2)
+
+        # only executable regions should be that one heap page and the stack, despite having more heap control and global control
+        nose.tools.assert_equal(sorted(exec_regions), sorted([0xb7ffb000, 0xbaaaaeec]))
+
+
 
 def test_boolector_solving():
     # Test boolector's ability to generate the correct values at pov runtime.

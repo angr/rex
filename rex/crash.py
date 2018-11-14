@@ -11,6 +11,7 @@ from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
 from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
+import archr
 from tracer import TracerPoV
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
@@ -30,13 +31,14 @@ class Crash:
     Triage a crash using angr.
     """
 
-    def __init__(self, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
+    def __init__(self, target, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, fast_mode=False,
                  explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, rop_cache_path=None,
                  trace_timeout=10, input_type=CrashInputType.STDIN, port=None, use_crash_input=False, tracer_args=None,
                  initial_state=None):
         """
-        :param binary:              Path to the binary which crashed.
+        :param target:              archr Target that contains the binary that crashed.
+        :param binary:              Local path to the binary which crashed.
         :param crash:               String of input which crashed the binary.
         :param pov_file:            CGC PoV describing a crash.
         :param aslr:                Analyze the crash with aslr on or off.
@@ -60,6 +62,7 @@ class Crash:
         :param trace_timeout:       Time the tracing operation out after this number of seconds
         """
 
+        self.target = target
         self.binary = binary
         self.crash  = crash
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
@@ -75,7 +78,12 @@ class Crash:
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
-        self.project = angr.Project(binary)
+
+        dsb = archr.arsenal.DataScoutBow(self.target)
+        apb = archr.arsenal.angrProjectBow(self.target, dsb)
+        
+        self.project = apb.fire()
+
         for addr, proc in self.hooks.items():
             self.project.hook(addr, proc)
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
@@ -134,8 +142,9 @@ class Crash:
 
             # optimized crash check
             if self.os == 'cgc':
-                if not tracer.QEMURunner(binary, input=self.crash, **tracer_args).crash_mode:
-                    if not tracer.QEMURunner(binary, input=self.crash, report_bad_args=True, **tracer_args).crash_mode:
+                r = archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash, **tracer_args)
+                if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash, **tracer_args).crashed:
+                    if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash, report_bad_args=True, **tracer_args).crashed:
                         l.warning("input did not cause a crash")
                         raise NonCrashingInput
 
@@ -156,7 +165,8 @@ class Crash:
             elif input_type == CrashInputType.UDP:
                 raise NotImplementedError()
 
-            r = tracer.QEMURunner(binary=binary, input=input_data, argv=argv, trace_timeout=trace_timeout, **tracer_args)
+            # Note: archr doesn't take in an argv, this should be set in the dockerfile. Remove at some point. 
+            r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, argv=argv, trace_timeout=trace_timeout, **tracer_args)
 
             kwargs = {}
             if self.project.loader.main_object.os == 'cgc':
@@ -221,7 +231,7 @@ class Crash:
 
             self.initial_state = initial_state
 
-            self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2, crash_addr=r.crash_addr)
+            self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2, crash_addr=r.crash_address)
             simgr.use_technique(self._t)
             simgr.use_technique(angr.exploration_techniques.Oppologist())
 
