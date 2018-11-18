@@ -33,7 +33,7 @@ class Crash:
 
     def __init__(self, target, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
                  prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, fast_mode=False,
-                 explore_steps=0, angrop_object=None, argv=None, concrete_fs=False, chroot=None, rop_cache_path=None,
+                 explore_steps=0, angrop_object=None, concrete_fs=False, chroot=None, rop_cache_path=None,
                  trace_timeout=10, input_type=CrashInputType.STDIN, port=None, use_crash_input=False, tracer_args=None,
                  initial_state=None):
         """
@@ -56,7 +56,6 @@ class Crash:
                                     only set by exploration methods.
         :param angrop_object:       An angrop object, should only be set by
                                     exploration methods.
-        :param argv:                Optionally specify argv params (i,e,: ['./calc', 'parm1']).
         :param concrete_fs:         Use the host's filesystem for analysis
         :param chroot:              For concrete_fs: use this host directory as the guest root
         :param trace_timeout:       Time the tracing operation out after this number of seconds
@@ -166,15 +165,16 @@ class Crash:
                 raise NotImplementedError()
 
             # Note: archr doesn't take in an argv, this should be set in the dockerfile. Remove at some point. 
-            r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, argv=argv, trace_timeout=trace_timeout, **tracer_args)
+            r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, timeout=trace_timeout, **tracer_args)
 
             kwargs = {}
             if self.project.loader.main_object.os == 'cgc':
                 cgc = True
             elif self.project.loader.main_object.os.startswith('UNIX'):
-                if argv is None:
-                    argv = ['./binary']
-                kwargs['args'] = argv
+                if target.target_args is None:
+                    kwargs['args'] = ['./binary']
+                else:
+                    kwargs['args'] = target.target_args
                 cgc = False
 
                 kwargs['concrete_fs'] = concrete_fs
@@ -226,7 +226,7 @@ class Crash:
                 initial_state,
                 save_unsat=False,
                 hierarchy=False,
-                save_unconstrained=r.crash_mode
+                save_unconstrained=r.crashed
             )
 
             self.initial_state = initial_state

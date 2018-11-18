@@ -175,17 +175,21 @@ def test_linux_stacksmash():
     # Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
     # ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
 
+    setup_module()
     crash = b"A" * 227
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_stacksmash"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'),
-            tracer_args={'ld_linux': os.path.join(bin_location, 'tests/i386/ld-linux.so.2'),
-                'library_path': os.path.join(bin_location, 'tests/i386')})
-    exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
+    with archr.targets.DockerImageTarget('angr-test:vuln_stacksmash', target_arch='i386').build() as t:
+        crash = rex.Crash(t, os.path.join(bin_location, "tests/i386/vuln_stacksmash/vuln_stacksmash"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'),
+                # tracer_args={'ld_linux': os.path.join(bin_location, 'tests/i386/ld-linux.so.2'),
+                #     'library_path': os.path.join(bin_location, 'tests/i386')})
+                tracer_args={'library_path': os.path.join(bin_location, 'tests/i386')})
 
-    # make sure we're able to exploit it in all possible ways
-    nose.tools.assert_equal(len(exploit.arsenal), 3)
-    nose.tools.assert_true('rop_to_system' in exploit.arsenal)
-    nose.tools.assert_true('call_shellcode' in exploit.arsenal)
-    nose.tools.assert_true('call_jmp_sp_shellcode' in exploit.arsenal)
+        exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
+
+        # make sure we're able to exploit it in all possible ways
+        assert len(exploit.arsenal) == 3
+        assert 'rop_to_system' in exploit.arsenal
+        assert 'call_shellcode' in exploit.arsenal
+        assert 'call_jmp_sp_shellcode' in exploit.arsenal
 
     # TODO test exploit with pwntool's 'process'
 
