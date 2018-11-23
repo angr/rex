@@ -79,9 +79,9 @@ class Crash:
 
 
         dsb = archr.arsenal.DataScoutBow(self.target)
-        apb = archr.arsenal.angrProjectBow(self.target, dsb)
+        angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
         
-        self.project = apb.fire()
+        self.project = angr_project_bow.fire()
 
         for addr, proc in self.hooks.items():
             self.project.hook(addr, proc)
@@ -160,7 +160,13 @@ class Crash:
 
             if input_type == CrashInputType.TCP:
                 # Feed input to the QEMURunner
-                _ = NetworkFeeder("tcp", "localhost", port, input_data)
+                if isinstance(target, archr.targets.DockerImageTarget):
+                    ip_address = target.ipv4_address
+                elif isinstance(target, archr.targets.LocalTarget):
+                    ip_address = "localhost"
+                else:
+                    raise NotImplementedError()
+                _ = NetworkFeeder("tcp", ip_address, port, input_data)
             elif input_type == CrashInputType.UDP:
                 raise NotImplementedError()
 
@@ -171,14 +177,7 @@ class Crash:
             if self.project.loader.main_object.os == 'cgc':
                 cgc = True
             elif self.project.loader.main_object.os.startswith('UNIX'):
-                if target.target_args is None:
-                    kwargs['args'] = ['./binary']
-                else:
-                    kwargs['args'] = target.target_args
                 cgc = False
-
-                kwargs['concrete_fs'] = concrete_fs
-                kwargs['chroot'] = chroot
             else:
                 raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
 
@@ -194,12 +193,15 @@ class Crash:
                 input_file = stdin_file = SimFileStream(name='stdin', ident='aeg_stdin')
 
             if initial_state is None:
-                initial_state = self.project.factory.full_init_state(
+                state_bow = archr.arsenal.angrStateBow(target, angr_project_bow)
+                initial_state = state_bow.fire(
                     mode='tracing',
                     add_options=add_options,
                     remove_options=remove_options,
                     **kwargs
                 )
+
+                # initialize other settings
                 initial_state.register_plugin('posix', SimSystemPosix(
                     stdin=stdin_file,
                     stdout=SimFileStream(name='stdout'),
