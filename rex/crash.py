@@ -5,6 +5,7 @@ import tracer
 import hashlib
 import logging
 import operator
+import pickle
 
 from angr import sim_options as so
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
@@ -19,7 +20,9 @@ from .vulnerability import Vulnerability
 from .network_feeder import NetworkFeeder
 from .enums import CrashInputType
 
+
 l = logging.getLogger("rex.Crash")
+l.setLevel(logging.INFO)
 
 
 class NonCrashingInput(Exception):
@@ -28,14 +31,22 @@ class NonCrashingInput(Exception):
 
 class Crash:
     """
-    Triage a crash using angr.
+    Triage and exploit a crash using angr.
     """
 
-    def __init__(self, target, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None, crash_state=None,
-                 prev_path=None, hooks=None, format_infos=None, rop_cache_tuple=None, use_rop=True, fast_mode=False,
-                 explore_steps=0, angrop_object=None, concrete_fs=False, chroot=None, rop_cache_path=None,
-                 trace_timeout=10, input_type=CrashInputType.STDIN, port=None, use_crash_input=False, tracer_args=None,
-                 initial_state=None):
+    def __init__(self, target, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None,
+                 hooks=None, format_infos=None,
+                 explore_steps=0, trace_timeout=10,
+                 input_type=CrashInputType.STDIN, port=None, use_crash_input=False, tracer_args=None,
+                 checkpoint_path=None,
+                 #
+                 # angrop-related settings
+                 #
+                 rop_cache_tuple=None, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None,
+                 #
+                 # the following are deprecated. use checkpoint_path instead.
+                 #
+                 prev_path=None, crash_state=None, initial_state=None):
         """
         :param target:              archr Target that contains the binary that crashed.
         :param binary:              Local path to the binary which crashed.
@@ -44,32 +55,38 @@ class Crash:
         :param aslr:                Analyze the crash with aslr on or off.
         :param constrained_addrs:   List of addrs which have been constrained
                                     during exploration.
-        :param crash_state:         An already traced crash state.
-        :param prev_path:           Path leading up to the crashing block.
         :param hooks:               Dictionary of simprocedure hooks, addresses
                                     to simprocedures.
         :param format_infos:        A list of atoi FormatInfo objects that should
                                     be used when analyzing the crash.
-        :param rop_cache_tuple:     A angrop tuple to load from.
-        :param use_rop:             Whether or not to use rop.
         :param explore_steps:       Number of steps which have already been explored, should
                                     only set by exploration methods.
+        :param trace_timeout:       Time the tracing operation out after this number of seconds.
+        :param checkpoint_path:     Path to a checkpoint file that provides initial_state, prev_state, crash_state, and
+                                    so on.
+
+        angrop-related settings:
+        :param rop_cache_tuple:     A angrop tuple to load from.
+        :param use_rop:             Whether or not to use rop.
         :param angrop_object:       An angrop object, should only be set by
                                     exploration methods.
-        :param concrete_fs:         Use the host's filesystem for analysis
-        :param chroot:              For concrete_fs: use this host directory as the guest root
-        :param trace_timeout:       Time the tracing operation out after this number of seconds
+
+        The following parameters are deprecated. Use checkpoint_path instead.
+        :param initial_state:       The initial state of exploitation.
+        :param crash_state:         An already traced crash state.
+        :param prev_path:           Path leading up to the crashing block.
         """
 
         self.target = target
         self.binary = binary
-        self.crash  = crash
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.hooks = {} if hooks is None else hooks
         self.explore_steps = explore_steps
         self.use_crash_input = use_crash_input
         self.input_type = input_type
-        self.initial_state = initial_state
+        self.target_port = port
+        self.crash = crash
+        self.trace_timeout = trace_timeout
 
         if tracer_args is None:
             tracer_args = {}
@@ -77,39 +94,28 @@ class Crash:
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
-
+        # Initialize an angr Project
         dsb = archr.arsenal.DataScoutBow(self.target)
-        angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
-        
-        self.project = angr_project_bow.fire()
+        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
+        self.project = self.angr_project_bow.fire()
 
+        # Add custom hooks
         for addr, proc in self.hooks.items():
             self.project.hook(addr, proc)
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
-        # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
-        # hash binary contents for rop cache name
-        binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
-        if not rop_cache_path:
-            rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
-
+        # ROP-related stuff
         if use_rop:
             if angrop_object is not None:
                 self.rop = angrop_object
             else:
-                self.rop = self.project.analyses.ROP(fast_mode=fast_mode)
-                if rop_cache_tuple is not None:
-                    l.info("loading rop gadgets from cache tuple")
-                    self.rop._load_cache_tuple(rop_cache_tuple)
-                elif os.path.exists(rop_cache_path):
-                    l.info("loading rop gadgets from cache '%s'", rop_cache_path)
-                    self.rop.load_gadgets(rop_cache_path)
-                else:
-                    if angr.misc.testing.is_testing:
-                        self.rop.find_gadgets_single_threaded(show_progress=False)
-                    else:
-                        self.rop.find_gadgets(show_progress=False)
-                    self.rop.save_gadgets(rop_cache_path)
+                if not rop_cache_path:
+                    # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
+                    # hash binary contents for rop cache name
+                    binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
+                    rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
+                self._rop = self._initialize_rop(fast_mode=fast_mode, rop_cache_tuple=rop_cache_tuple,
+                                                 rop_cache_path=rop_cache_path)
         else:
             self.rop = None
 
@@ -120,185 +126,65 @@ class Crash:
         if self.os.startswith('UNIX'):
             self.os = 'unix'
 
-        # determine the aslr of a given os and arch
+        # ASLR-related stuff
         if aslr is None:
-            if self.os == "cgc": # cgc has no ASLR, but we don't assume a stackbase
+            if self.os == "cgc":
+                # cgc has no ASLR, but we don't assume a stackbase
                 self.aslr = False
-            else: # we assume linux is going to enforce stack-based ASLR
+            else:
+                # We assume Linux is going to enforce stack-based ASLR
                 self.aslr = True
         else:
             self.aslr = aslr
 
-        if crash_state is None:
-            # run the tracer, grabbing the crash state
-            remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
-                              so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
-                              so.ALL_FILES_EXIST}
-            add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
-                           so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS}
-
-            # faster place to check for non-crashing inputs
-
-            # optimized crash check
-            if self.os == 'cgc':
-                r = archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash, **tracer_args)
-                if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash, **tracer_args).crashed:
-                    if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash, report_bad_args=True, **tracer_args).crashed:
-                        l.warning("input did not cause a crash")
-                        raise NonCrashingInput
-
-            if pov_file is None and self.crash is None:
-                raise ValueError("must specify crash or pov_file")
-
-            if pov_file is not None and self.crash is not None:
-                raise ValueError("cannot specify both a pov_file and an crash")
-
-            if pov_file is not None:
-                input_data = TracerPoV(pov_file)
-            else:
-                input_data = self.crash
-
-            if input_type == CrashInputType.TCP:
-                # Feed input to the QEMURunner
-                if isinstance(target, archr.targets.DockerImageTarget):
-                    ip_address = target.ipv4_address
-                elif isinstance(target, archr.targets.LocalTarget):
-                    ip_address = "localhost"
-                else:
-                    raise NotImplementedError()
-                _ = NetworkFeeder("tcp", ip_address, port, input_data)
-            elif input_type == CrashInputType.UDP:
-                raise NotImplementedError()
-
-            # Note: archr doesn't take in an argv, this should be set in the dockerfile. Remove at some point. 
-            r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, timeout=trace_timeout, **tracer_args)
-
-            kwargs = {}
-            if self.project.loader.main_object.os == 'cgc':
-                cgc = True
-            elif self.project.loader.main_object.os.startswith('UNIX'):
-                cgc = False
-            else:
-                raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
-
-            socket_queue = None
-            stdin_file = None # the file that will be fd 0
-            input_file = None # the file that we want to preconstrain
-
-            if input_type == CrashInputType.TCP:
-                input_file = input_sock = SimFileStream(name="aeg_tcp_in", ident='aeg_stdin')
-                output_sock = SimFileStream(name="aeg_tcp_out")
-                socket_queue = [ None, None, None, (input_sock, output_sock) ] # FIXME THIS IS A HACK
-            else:
-                input_file = stdin_file = SimFileStream(name='stdin', ident='aeg_stdin')
-
-            if initial_state is None:
-                state_bow = archr.arsenal.angrStateBow(target, angr_project_bow)
-                initial_state = state_bow.fire(
-                    mode='tracing',
-                    add_options=add_options,
-                    remove_options=remove_options,
-                    **kwargs
-                )
-
-                # initialize other settings
-                initial_state.register_plugin('posix', SimSystemPosix(
-                    stdin=stdin_file,
-                    stdout=SimFileStream(name='stdout'),
-                    stderr=SimFileStream(name='stderr'),
-                    argc=initial_state.posix.argc,
-                    argv=initial_state.posix.argv,
-                    environ=initial_state.posix.environ,
-                    auxv=initial_state.posix.auxv,
-                    socket_queue=socket_queue,
-                ))
-
-                initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-                initial_state.preconstrainer.preconstrain_file(input_data, input_file, set_length=True)
-                if cgc:
-                    initial_state.preconstrainer.preconstrain_flag_page(r.magic)
-
-                # Loosen certain libc limits on symbolic input
-                initial_state.libc.buf_symbolic_bytes = 3000
-                initial_state.libc.max_symbolic_strchr = 3000
-                initial_state.libc.max_str_len = 3000
-                initial_state.libc.max_buffer_size = 16384
-
-            simgr = self.project.factory.simulation_manager(
-                initial_state,
-                save_unsat=False,
-                hierarchy=False,
-                save_unconstrained=r.crashed
-            )
-
-            self.initial_state = initial_state
-
-            self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2, crash_addr=r.crash_address)
-            simgr.use_technique(self._t)
-            simgr.use_technique(angr.exploration_techniques.Oppologist())
-
-            if cgc:
-                s = simgr.one_active
-                ChallRespInfo.prep_tracer(s, format_infos)
-                ZenPlugin.prep_tracer(s)
-
-            simgr.run()
-
-            # if there was no crash we'll have to use the previous path's state
-            if 'crashed' in simgr.stashes:
-                # the state at crash time
-                self.state = simgr.crashed[0]
-                # a path leading up to the crashing basic block
-                self.prev = self._t.predecessors[-1]
-            else:
-                self.state = simgr.traced[0]
-                self.prev = self.state
-
-            zp = self.state.get_plugin('zen_plugin') if cgc else None
-            if 'crashed' not in simgr.stashes and zp is not None and len(zp.controlled_transmits) == 0:
-                l.warning("input did not cause a crash")
-                raise NonCrashingInput
-
-            l.debug("done tracing input")
-
-        else:
+        # Load cached/intermediate states
+        self.core_registers = None
+        if crash_state is not None or prev_path is not None or initial_state is not None:
+            l.warning("'crash_state', 'prev_path' and 'initial_state' are deprecated. Please use 'checkpoint' instead.")
             self.state = crash_state
             self.prev = prev_path
-            self._t = None
+            self.initial_state = initial_state
+            traced = True
+        elif checkpoint_path is not None:
+            l.info("Loading checkpoint file at %#s.", checkpoint_path)
+            self.checkpoint_restore(checkpoint_path)
+            traced = True
+        else:
+            self.state = None
+            self.prev = None
+            self.initial_state = None
+            traced = False
 
-        # list of actions added during exploitation, probably better object for this attribute to belong to
-        self.added_actions = [ ]
+        self._t = None  # The angr.exploration_techniques.Tracer object. Will be created during self._trace()
+        if not traced:
+            # Begin tracing!
+            self._trace(pov_file=pov_file,
+                        tracer_args=tracer_args,
+                        format_infos=format_infos,
+                        )
 
-        # hacky trick to get all bytes
-        #memory_writes = [ ]
-        #for var in self.state.memory.mem._name_mapping.keys():
-        #    memory_writes.extend(self.state.memory.addrs_for_name(var))
+        self.added_actions = [ ]  # list of actions added during exploitation
 
-        memory_writes = sorted(self.state.memory.mem.get_symbolic_addrs())
-        l.debug("filtering writes")
-        memory_writes = [m for m in memory_writes if m//0x1000 != 0x4347c]
-        user_writes = [m for m in memory_writes if any("aeg_stdin" in v for v in self.state.memory.load(m, 1).variables)]
-        flag_writes = [m for m in memory_writes if any(v.startswith("cgc-flag") for v in self.state.memory.load(m, 1).variables)]
-        l.debug("done filtering writes")
+        l.info("Filtering memory writes.")
+        self.symbolic_mem = None
+        self.flag_mem = None
+        self._filter_memory_writes()
 
-        self.symbolic_mem = self._segment(user_writes)
-        self.flag_mem = self._segment(flag_writes)
-
-        # crash type
-        self.crash_types = [ ]
-        # action (in case of a bad write or read) which caused the crash
-        self.violating_action = None
-
-        l.debug("triaging crash")
+        l.info("Triaging the crash.")
+        self.crash_types = [ ]  # crash type
+        self.violating_action = None  # action (in case of a bad write or read) which caused the crash
         self._triage_crash()
 
-### EXPOSED
+    #
+    # Public methods
+    #
 
     def exploitable(self):
-        '''
-        determine if the crash is exploitable
+        """
+        Determine if the crash is exploitable.
+
         :return: True if the crash's type is generally considered exploitable, False otherwise
-        '''
+        """
 
         exploitables = [Vulnerability.IP_OVERWRITE, Vulnerability.PARTIAL_IP_OVERWRITE, Vulnerability.BP_OVERWRITE,
                 Vulnerability.PARTIAL_BP_OVERWRITE, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
@@ -306,10 +192,11 @@ class Crash:
         return self.one_of(exploitables)
 
     def explorable(self):
-        '''
-        determine if the crash can be explored with the 'crash explorer'.
+        """
+        Determine if the crash can be explored with the 'crash explorer'.
+
         :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
-        '''
+        """
 
         # TODO add arbitrary receive into this list
         explorables = [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
@@ -317,10 +204,11 @@ class Crash:
         return self.one_of(explorables)
 
     def leakable(self):
-        '''
-        determine if the crash can potentially cause an information leak using the point-to-flag technique
+        """
+        Determine if the crash can potentially cause an information leak using the point-to-flag technique.
+
         :return: True if the 'point-to-flag' technique can be applied to this crash
-        '''
+        """
 
         return self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT])
 
@@ -349,9 +237,12 @@ class Crash:
         return exploit
 
     def exploit(self, blacklist_symbolic_explore=True, **kwargs):
-        '''
-        craft an exploit for a crash
-        '''
+        """
+        Initialize an exploit factory, with which you can build exploits.
+
+        :return:    An initialized ExploitFactory instance.
+        :rtype:     ExploitFactory
+        """
 
         factory = self._prepare_exploit_factory(blacklist_symbolic_explore, **kwargs)
 
@@ -359,9 +250,9 @@ class Crash:
         return factory
 
     def yield_exploits(self, blacklist_symbolic_explore=True, **kwargs):
-        '''
+        """
         craft an exploit for a crash
-        '''
+        """
 
         factory = self._prepare_exploit_factory(blacklist_symbolic_explore, **kwargs)
 
@@ -369,9 +260,9 @@ class Crash:
             yield exploit
 
     def explore(self, path_file=None):
-        '''
+        """
         explore a crash further to find new bugs
-        '''
+        """
 
         # crash should be classified at this point
         if not self.explorable():
@@ -389,9 +280,9 @@ class Crash:
             raise CannotExplore("unknown explorable crash type: %s" % self.crash_types)
 
     def point_to_flag(self):
-        '''
+        """
         Create a testcase which points an arbitrary-read crash at the flag page.
-        '''
+        """
         if not self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT]):
             raise CannotExploit("only arbitrary-reads can be exploited this way")
 
@@ -441,82 +332,298 @@ class Crash:
                     except CannotExploit:
                         l.warning("crash couldn't be pointed at flag skipping")
 
-    @staticmethod
-    def _four_flag_bytes_offset(ast):
+    def memory_control(self):
         """
-        checks if an ast contains 4 contiguous flag bytes
-        if so returns the offset in bytes, otherwise returns None
-        :return: the offset or None
+        determine what symbolic memory we control which is at a constant address
+
+        TODO: be able to specify that we want to know about things relative to a certain address
+
+        :return:        A mapping from address to length of data controlled at that address
         """
-        if ast.op != "Concat":
-            return None
 
-        offset = 0
-        flag_start_off = None
-        first_flag_index = None
+        control = { }
 
-        for arg in ast.args:
-            # if it's not byte aligned
-            if offset % 8 != 0:
-                offset += arg.size()//8
+        # PIE binaries will give no global control without knowledge of the binary base
+        if self.project.loader.main_object.pic:
+            return control
+
+        min_addr = self.project.loader.main_object.min_addr
+        max_addr = self.project.loader.main_object.max_addr
+        for addr in self.symbolic_mem:
+            if addr >= min_addr and addr < max_addr:
+                control[addr] = self.symbolic_mem[addr]
+
+        return control
+
+    def stack_control(self):
+        """
+        determine what symbolic memory we control equal to or beneath the stack pointer
+
+        :return:        A mapping from address to length of data controlled at that address
+        """
+
+        control = { }
+
+        if self.state.solver.symbolic(self.state.regs.sp):
+            l.warning("detected symbolic sp when gauging stack control")
+            return control
+
+        sp = self.state.solver.eval(self.state.regs.sp)
+        sp_base = self.initial_state.solver.eval(self.initial_state.regs.sp)
+        for addr in self.symbolic_mem:
+            # discard our fake heap etc
+            if addr > sp_base:
                 continue
 
-            # check if the arg is a flag byte
-            if arg.op == "BVS" and len(arg.variables) == 1 and list(arg.variables)[0].startswith("cgc-flag-byte-"):
-                # we found a flag byte
-                flag_byte = int(list(arg.variables)[0].split("-")[-1].split("_")[0], 10)
+            # if the region is below sp it gets added
+            elif addr > sp:
+                control[addr] = self.symbolic_mem[addr]
 
-                if flag_start_off is None:
-                    # no start
-                    flag_start_off = offset // 8
-                    first_flag_index = flag_byte
-                elif (offset//8 - flag_start_off) != flag_byte - first_flag_index:
-                    # not contiguous
-                    flag_start_off = offset//8
-                    first_flag_index = flag_byte
-                else:
-                    # contiguous
-                    if flag_byte-first_flag_index == 3:
-                        return flag_start_off
+            # if sp falls into the region it gets added starting at sp
+            elif addr + self.symbolic_mem[addr] > sp:
+                control[sp] = addr + self.symbolic_mem[addr] - sp
+
+        return control
+
+    def copy(self):
+        cp = Crash.__new__(Crash)
+        cp.binary = self.binary
+        cp.crash = self.crash
+        cp.input_type = self.input_type
+        cp.project = self.project
+        cp.os = self.os
+        cp.aslr = self.aslr
+        cp.prev = self.prev.copy()
+        cp.state = self.state.copy()
+        cp.initial_state = self.initial_state
+        cp.rop = self.rop
+        cp.added_actions = list(self.added_actions)
+        cp.symbolic_mem = self.symbolic_mem.copy()
+        cp.flag_mem = self.flag_mem.copy()
+        cp.crash_types = self.crash_types
+        cp._t = self._t
+        cp.violating_action = self.violating_action
+        cp.use_crash_input = self.use_crash_input
+        cp.explore_steps = self.explore_steps
+        cp.constrained_addrs = list(self.constrained_addrs)
+        cp.core_registers = self.core_registers.copy() if self.core_registers is not None else None
+
+        return cp
+
+    def checkpoint(self, path):
+        """
+        Save intermediate results (traced states, etc.) to a file to allow faster exploit generation in the future.
+
+        :param str path:    Path to the file which saves intermediate states.
+        :return:            None
+        """
+
+        s = {
+            'initial_state': self.initial_state,
+            'crash_state': self.state,
+            'prev_state': self.prev,
+            'core_registers': self.core_registers,
+        }
+
+        with open(path, "wb") as f:
+            pickle.dump(s, f)
+
+    def checkpoint_restore(self, path):
+        """
+        Restore from a checkpoint file.
+
+        :param str path:    Path to the file which saves intermediate states.
+        :return:            None
+        """
+
+        with open(path, "rb") as f:
+            s = pickle.load(f)
+
+        keys = {'initial_state',
+                'crash_state',
+                'prev_state',
+                'core_registers',
+                }
+
+        if not isinstance(s, dict):
+            raise TypeError("The checkpoint file has an incorrect format.")
+
+        for k in keys:
+            if k not in s:
+                raise KeyError("Key %s is not found in the checkpoint file." % k)
+
+        self.initial_state = s['initial_state']
+        self.state = s['crash_state']
+        self.prev = s['prev_state']
+        self.core_registers = s['core_registers']
+
+    @property
+    def is_cgc(self):
+        """
+        Are we working on a CGC binary?
+        """
+        if self.project.loader.main_object.os == 'cgc':
+            return True
+        elif self.project.loader.main_object.os.startswith('UNIX'):
+            return False
+        else:
+            raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
+
+    def one_of(self, crash_types):
+        """
+        Test if a self's crash has one of the vulnerabilities described in crash_types
+        """
+
+        if not isinstance(crash_types, (list, tuple)):
+            crash_types = [crash_types]
+
+        return bool(len(set(self.crash_types).intersection(set(crash_types))))
+
+    #
+    # Private methods
+    #
+
+    def _trace(self, pov_file=None, tracer_args=None, format_infos=None):
+
+        # faster place to check for non-crashing inputs
+
+        # optimized crash check
+        if self.os == 'cgc':
+            r = archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash, **tracer_args)
+            if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash,
+                                                                 **tracer_args).crashed:
+                if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash,
+                                                                     report_bad_args=True, **tracer_args).crashed:
+                    l.warning("input did not cause a crash")
+                    raise NonCrashingInput
+            cgc_flag_page_magic = r.magic
+        else:
+            cgc_flag_page_magic = None
+
+        if pov_file is None and self.crash is None:
+            raise ValueError("must specify crash or pov_file")
+
+        if pov_file is not None and self.crash is not None:
+            raise ValueError("cannot specify both a pov_file and an crash")
+
+        if pov_file is not None:
+            input_data = TracerPoV(pov_file)
+        else:
+            input_data = self.crash
+
+        if self.input_type == CrashInputType.TCP:
+            # Feed input to the QEMURunner
+            if isinstance(self.target, archr.targets.DockerImageTarget):
+                ip_address = self.target.ipv4_address
+            elif isinstance(self.target, archr.targets.LocalTarget):
+                ip_address = "localhost"
             else:
-                flag_start_off = None
-                first_flag_index = None
+                raise NotImplementedError()
+            _ = NetworkFeeder("tcp", ip_address, self.target_port, input_data)
+        elif self.input_type == CrashInputType.UDP:
+            raise NotImplementedError()
 
-            offset += arg.size()
+        r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, timeout=self.trace_timeout,
+                                                          save_core=True, **tracer_args
+                                                          )
+        if not self.core_registers:
+            # If a coredump is available, save a copy of all registers in the coredump for future references
+            if os.path.isfile(r.core_path):
+                tiny_core = tracer.TinyCore(r.core_path)
+                self.core_registers = tiny_core.registers
 
-        return None
+        if self.initial_state is None:
+            self.initial_state = self._create_initial_state(input_data,
+                                                            cgc_flag_page_magic=cgc_flag_page_magic,
+                                                            )
 
-    @staticmethod
-    def _get_state_pointing_to_flag(state, violating_addr):
-        cgc_magic_page_addr = 0x4347c000
+        simgr = self.project.factory.simulation_manager(
+            self.initial_state,
+            save_unsat=False,
+            hierarchy=False,
+            save_unconstrained=r.crashed
+        )
 
-        # see if we can point randomly inside the flag (prevent people filtering exactly 0x4347c000)
-        rand_addr = random.randint(cgc_magic_page_addr, cgc_magic_page_addr+0x1000-4)
-        if state.solver.satisfiable(extra_constraints=(violating_addr == rand_addr,)):
-            cp = state.copy()
-            cp.add_constraints(violating_addr == rand_addr)
-            return cp
+        self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2,
+                                                     crash_addr=r.crash_address)
+        simgr.use_technique(self._t)
+        simgr.use_technique(angr.exploration_techniques.Oppologist())
 
-        # see if we can point anywhere at flag
-        if state.solver.satisfiable(extra_constraints=
-                                (violating_addr >= cgc_magic_page_addr,
-                                 violating_addr < cgc_magic_page_addr+0x1000-4)):
-            cp = state.copy()
-            cp.add_constraints(violating_addr >= cgc_magic_page_addr)
-            cp.add_constraints(violating_addr < cgc_magic_page_addr+0x1000-4)
-            return cp
+        if self.is_cgc:
+            s = simgr.one_active
+            ChallRespInfo.prep_tracer(s, format_infos)
+            ZenPlugin.prep_tracer(s)
+
+        simgr.run()
+
+        # if there was no crash we'll have to use the previous path's state
+        if 'crashed' in simgr.stashes:
+            # the state at crash time
+            self.state = simgr.crashed[0]
+            # a path leading up to the crashing basic block
+            self.prev = self._t.predecessors[-1]
         else:
-            raise CannotExploit("unable to point arbitrary-read at the flag page")
+            self.state = simgr.traced[0]
+            self.prev = self.state
 
-    @staticmethod
-    def _get_state_pointing_to_addr(state, violating_addr, goal_addr):
-        if state.solver.satisfiable(extra_constraints=(violating_addr == goal_addr,)):
-            cp = state.copy()
-            cp.add_constraints(violating_addr == goal_addr)
-            return cp
+        zp = self.state.get_plugin('zen_plugin') if self.is_cgc else None
+        if 'crashed' not in simgr.stashes and zp is not None and len(zp.controlled_transmits) == 0:
+            l.warning("input did not cause a crash")
+            raise NonCrashingInput
+
+        l.debug("done tracing input")
+
+    def _create_initial_state(self, input_data, cgc_flag_page_magic=None):
+
+        # run the tracer, grabbing the crash state
+        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
+                          so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
+                          so.ALL_FILES_EXIST}
+        add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
+                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS}
+
+        socket_queue = None
+        stdin_file = None  # the file that will be fd 0
+        input_file = None  # the file that we want to preconstrain
+
+        if self.input_type == CrashInputType.TCP:
+            input_file = input_sock = SimFileStream(name="aeg_tcp_in", ident='aeg_stdin')
+            output_sock = SimFileStream(name="aeg_tcp_out")
+            socket_queue = [None, None, None, (input_sock, output_sock)]  # FIXME THIS IS A HACK
         else:
-            raise CannotExploit("unable to point arbitrary-read at the flag copy")
+            input_file = stdin_file = SimFileStream(name='stdin', ident='aeg_stdin')
 
+        state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
+        initial_state = state_bow.fire(
+            mode='tracing',
+            add_options=add_options,
+            remove_options=remove_options,
+        )
+
+        # initialize other settings
+        initial_state.register_plugin('posix', SimSystemPosix(
+            stdin=stdin_file,
+            stdout=SimFileStream(name='stdout'),
+            stderr=SimFileStream(name='stderr'),
+            argc=initial_state.posix.argc,
+            argv=initial_state.posix.argv,
+            environ=initial_state.posix.environ,
+            auxv=initial_state.posix.auxv,
+            socket_queue=socket_queue,
+        ))
+
+        initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+        initial_state.preconstrainer.preconstrain_file(input_data, input_file, set_length=True)
+        if self.is_cgc:
+            initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
+
+        # Loosen certain libc limits on symbolic input
+        initial_state.libc.buf_symbolic_bytes = 3000
+        initial_state.libc.max_symbolic_strchr = 3000
+        initial_state.libc.max_str_len = 3000
+        initial_state.libc.max_buffer_size = 16384
+
+        return initial_state
 
     def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a
@@ -627,167 +734,29 @@ class Crash:
                 use_rop=use_rop,
                 angrop_object=self.rop)
 
-    def memory_control(self):
+    def _filter_memory_writes(self):
         """
-        determine what symbolic memory we control which is at a constant address
+        Filter all writes to memory and split them to symbolic memory bytes and flag memory bytes.
 
-        TODO: be able to specify that we want to know about things relative to a certain address
-
-        :return:        A mapping from address to length of data controlled at that address
+        :return:    None
         """
 
-        control = { }
+        memory_writes = sorted(self.state.memory.mem.get_symbolic_addrs())
+        if self.is_cgc:
+            # remove all memory writes that directly end up in the CGC flag page (0x4347c000 - 0x4347d000)
+            memory_writes = [m for m in memory_writes if m // 0x1000 != 0x4347c]
+        user_writes = [m for m in memory_writes if
+                       any("aeg_stdin" in v for v in self.state.memory.load(m, 1).variables)]
+        if self.is_cgc:
+            flag_writes = [m for m in memory_writes if
+                           any(v.startswith("cgc-flag") for v in self.state.memory.load(m, 1).variables)]
+        else:
+            flag_writes = []
 
-        # PIE binaries will give no global control without knowledge of the binary base
-        if self.project.loader.main_object.pic:
-            return control
+        l.debug("Finished filtering memory writes.")
 
-        min_addr = self.project.loader.main_object.min_addr
-        max_addr = self.project.loader.main_object.max_addr
-        for addr in self.symbolic_mem:
-            if addr >= min_addr and addr < max_addr:
-                control[addr] = self.symbolic_mem[addr]
-
-        return control
-
-    def stack_control(self):
-        """
-        determine what symbolic memory we control equal to or beneath the stack pointer
-
-        :return:        A mapping from address to length of data controlled at that address
-        """
-
-        control = { }
-
-        if self.state.solver.symbolic(self.state.regs.sp):
-            l.warning("detected symbolic sp when gauging stack control")
-            return control
-
-        sp = self.state.solver.eval(self.state.regs.sp)
-        sp_base = self.initial_state.solver.eval(self.initial_state.regs.sp)
-        for addr in self.symbolic_mem:
-            # discard our fake heap etc
-            if addr > sp_base:
-                continue
-
-            # if the region is below sp it gets added
-            elif addr > sp:
-                control[addr] = self.symbolic_mem[addr]
-
-            # if sp falls into the region it gets added starting at sp
-            elif addr + self.symbolic_mem[addr] > sp:
-                control[sp] = addr + self.symbolic_mem[addr] - sp
-
-        return control
-
-
-    def copy(self):
-        cp = Crash.__new__(Crash)
-        cp.binary = self.binary
-        cp.crash = self.crash
-        cp.input_type = self.input_type
-        cp.project = self.project
-        cp.os = self.os
-        cp.aslr = self.aslr
-        cp.prev = self.prev.copy()
-        cp.state = self.state.copy()
-        cp.initial_state = self.initial_state
-        cp.rop = self.rop
-        cp.added_actions = list(self.added_actions)
-        cp.symbolic_mem = self.symbolic_mem.copy()
-        cp.flag_mem = self.flag_mem.copy()
-        cp.crash_types = self.crash_types
-        cp._t = self._t
-        cp.violating_action = self.violating_action
-        cp.use_crash_input = self.use_crash_input
-        cp.explore_steps = self.explore_steps
-        cp.constrained_addrs = list(self.constrained_addrs)
-
-        return cp
-
-### UTIL
-    def _reconstrain_flag_data(self, state):
-
-        l.info("reconstraining flag")
-
-        replace_dict = dict()
-        for c in state.preconstrainer.preconstraints:
-            if any([v.startswith('cgc-flag') or v.startswith("random") for v in list(c.variables)]):
-                concrete = next(a for a in c.args if not a.symbolic)
-                symbolic = next(a for a in c.args if a.symbolic)
-                replace_dict[symbolic.cache_key] = concrete
-        cons = state.solver.constraints
-        new_cons = []
-        for c in cons:
-            new_c = c.replace_dict(replace_dict)
-            new_cons.append(new_c)
-        state.release_plugin("solver")
-        state.add_constraints(*new_cons)
-        state.downsize()
-        state.solver.simplify()
-
-    def one_of(self, crash_types):
-        '''
-        Test if a self's crash has one of the vulnerabilities described in crash_types
-        '''
-
-        if not isinstance(crash_types, (list, tuple)):
-            crash_types = [crash_types]
-
-        return bool(len(set(self.crash_types).intersection(set(crash_types))))
-
-    @staticmethod
-    def _segment(memory_writes):
-        """
-        Given a set of addresses, group into a dict mapping from address to length
-
-        :param Iterable memory_writes:   Addresses in memory
-        :return dict:               A map from start address to the length of continuous addresses after the start
-        """
-        segments = { }
-        memory_writes = sorted(memory_writes)
-
-        if len(memory_writes) == 0:
-            return segments
-
-        current_w_start = memory_writes[0]
-        current_w_end = current_w_start + 1
-
-        for write in memory_writes[1:]:
-            write_start = write
-            write_len = 1
-
-            # segment is completely seperate
-            if write_start > current_w_end:
-                # store the old segment
-                segments[current_w_start] = current_w_end - current_w_start
-
-                # new segment, update start and end
-                current_w_start = write_start
-                current_w_end = write_start + write_len
-            else:
-                # update the end of the current segment, the segment `write` exists within current
-                current_w_end = max(current_w_end, write_start + write_len)
-
-
-        # write in the last segment
-        segments[current_w_start] = current_w_end - current_w_start
-
-        return segments
-
-    def _symbolic_control(self, st):
-        '''
-        determine the amount of symbolic bits in an ast, useful to determining how much control we have
-        over registers
-        '''
-
-        sbits = 0
-
-        for bitidx in range(self.state.arch.bits):
-            if st[bitidx].symbolic:
-                sbits += 1
-
-        return sbits
+        self.symbolic_mem = self._segment(user_writes)
+        self.flag_mem = self._segment(flag_writes)
 
     def _triage_crash(self):
         ip = self.state.regs.ip
@@ -841,7 +810,7 @@ class Crash:
 
         # TODO: pick the crashing action based off the crashing instruction address,
         # crash fixup attempts will break on this
-       #import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         for sym_action in symbolic_actions:
             if sym_action.action == "write":
                 if self.state.solver.symbolic(sym_action.data):
@@ -862,7 +831,185 @@ class Crash:
                 self.violating_action = sym_action
                 break
 
-        return
+    def _reconstrain_flag_data(self, state):
+
+        l.info("reconstraining flag")
+
+        replace_dict = dict()
+        for c in state.preconstrainer.preconstraints:
+            if any([v.startswith('cgc-flag') or v.startswith("random") for v in list(c.variables)]):
+                concrete = next(a for a in c.args if not a.symbolic)
+                symbolic = next(a for a in c.args if a.symbolic)
+                replace_dict[symbolic.cache_key] = concrete
+        cons = state.solver.constraints
+        new_cons = []
+        for c in cons:
+            new_c = c.replace_dict(replace_dict)
+            new_cons.append(new_c)
+        state.release_plugin("solver")
+        state.add_constraints(*new_cons)
+        state.downsize()
+        state.solver.simplify()
+
+    def _symbolic_control(self, st):
+        """
+        Determine the amount of symbolic bits in an AST, useful to determining how much control we have
+        over registers.
+
+        :param st:  A claripy AST object to examine.
+        :return:    Number of symbolic bits in the AST.
+        :rtype:     int
+        """
+
+        sbits = 0
+
+        for bitidx in range(self.state.arch.bits):
+            if st[bitidx].symbolic:
+                sbits += 1
+
+        return sbits
+
+    def _initialize_rop(self, fast_mode=False, rop_cache_tuple=None, rop_cache_path=None):
+        """
+        Use angrop to generate ROP gadgets and such.
+
+        :return:    An angr.analyses.ROP instance.
+        """
+
+        rop = self.project.analyses.ROP(fast_mode=fast_mode)
+        if rop_cache_tuple is not None:
+            l.info("loading rop gadgets from cache tuple")
+            rop._load_cache_tuple(rop_cache_tuple)
+        elif os.path.exists(rop_cache_path):
+            l.info("loading rop gadgets from cache '%s'", rop_cache_path)
+            rop.load_gadgets(rop_cache_path)
+        else:
+            if angr.misc.testing.is_testing:
+                rop.find_gadgets_single_threaded(show_progress=False)
+            else:
+                rop.find_gadgets(show_progress=False)
+            rop.save_gadgets(rop_cache_path)
+        return rop
+
+    #
+    # Static methods
+    #
+
+    @staticmethod
+    def _four_flag_bytes_offset(ast):
+        """
+        checks if an ast contains 4 contiguous flag bytes
+        if so returns the offset in bytes, otherwise returns None
+        :return: the offset or None
+        """
+        if ast.op != "Concat":
+            return None
+
+        offset = 0
+        flag_start_off = None
+        first_flag_index = None
+
+        for arg in ast.args:
+            # if it's not byte aligned
+            if offset % 8 != 0:
+                offset += arg.size()//8
+                continue
+
+            # check if the arg is a flag byte
+            if arg.op == "BVS" and len(arg.variables) == 1 and list(arg.variables)[0].startswith("cgc-flag-byte-"):
+                # we found a flag byte
+                flag_byte = int(list(arg.variables)[0].split("-")[-1].split("_")[0], 10)
+
+                if flag_start_off is None:
+                    # no start
+                    flag_start_off = offset // 8
+                    first_flag_index = flag_byte
+                elif (offset//8 - flag_start_off) != flag_byte - first_flag_index:
+                    # not contiguous
+                    flag_start_off = offset//8
+                    first_flag_index = flag_byte
+                else:
+                    # contiguous
+                    if flag_byte-first_flag_index == 3:
+                        return flag_start_off
+            else:
+                flag_start_off = None
+                first_flag_index = None
+
+            offset += arg.size()
+
+        return None
+
+    @staticmethod
+    def _get_state_pointing_to_flag(state, violating_addr):
+        cgc_magic_page_addr = 0x4347c000
+
+        # see if we can point randomly inside the flag (prevent people filtering exactly 0x4347c000)
+        rand_addr = random.randint(cgc_magic_page_addr, cgc_magic_page_addr+0x1000-4)
+        if state.solver.satisfiable(extra_constraints=(violating_addr == rand_addr,)):
+            cp = state.copy()
+            cp.add_constraints(violating_addr == rand_addr)
+            return cp
+
+        # see if we can point anywhere at flag
+        if state.solver.satisfiable(extra_constraints=
+                                (violating_addr >= cgc_magic_page_addr,
+                                 violating_addr < cgc_magic_page_addr+0x1000-4)):
+            cp = state.copy()
+            cp.add_constraints(violating_addr >= cgc_magic_page_addr)
+            cp.add_constraints(violating_addr < cgc_magic_page_addr+0x1000-4)
+            return cp
+        else:
+            raise CannotExploit("unable to point arbitrary-read at the flag page")
+
+    @staticmethod
+    def _get_state_pointing_to_addr(state, violating_addr, goal_addr):
+        if state.solver.satisfiable(extra_constraints=(violating_addr == goal_addr,)):
+            cp = state.copy()
+            cp.add_constraints(violating_addr == goal_addr)
+            return cp
+        else:
+            raise CannotExploit("unable to point arbitrary-read at the flag copy")
+
+    @staticmethod
+    def _segment(memory_writes):
+        """
+        Given a set of addresses, group into a dict mapping from address to length
+
+        :param Iterable memory_writes:   Addresses in memory
+        :return dict:               A map from start address to the length of continuous addresses after the start
+        """
+        segments = { }
+        memory_writes = sorted(memory_writes)
+
+        if len(memory_writes) == 0:
+            return segments
+
+        current_w_start = memory_writes[0]
+        current_w_end = current_w_start + 1
+
+        for write in memory_writes[1:]:
+            write_start = write
+            write_len = 1
+
+            # segment is completely seperate
+            if write_start > current_w_end:
+                # store the old segment
+                segments[current_w_start] = current_w_end - current_w_start
+
+                # new segment, update start and end
+                current_w_start = write_start
+                current_w_end = write_start + write_len
+            else:
+                # update the end of the current segment, the segment `write` exists within current
+                current_w_end = max(current_w_end, write_start + write_len)
+
+
+        # write in the last segment
+        segments[current_w_start] = current_w_end - current_w_start
+
+        return segments
+
 
 class QuickCrash:
 
