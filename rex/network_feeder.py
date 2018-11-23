@@ -9,7 +9,7 @@ class NetworkFeeder:
     A class that feeds data to a socket port
     """
 
-    def __init__(self, proto, host, port, data, is_client=True, delay=3, timeout=2):
+    def __init__(self, proto, host, port, data, is_client=True, delay=5, timeout=2):
 
         if not is_client:
             raise NotImplementedError("Server mode is not implemented.")
