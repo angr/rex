@@ -96,7 +96,7 @@ def test_shellcode_placement():
 
     crash = b"A" * 272
 
-    with archr.targets.DockerImageTarget('angr-test:shellcode_tester').build() as t:
+    with archr.targets.DockerImageTarget('angr-test:shellcode_tester').build().start() as t:
     
         crash = rex.Crash(t, os.path.join(bin_location, "tests/i386/shellcode_tester/shellcode_tester"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'shellcode_tester'))
 
@@ -177,7 +177,7 @@ def test_linux_stacksmash():
 
     setup_module()
     crash = b"A" * 227
-    with archr.targets.DockerImageTarget('angr-test:vuln_stacksmash', target_arch='i386').build() as t:
+    with archr.targets.DockerImageTarget('angr-test:vuln_stacksmash', target_arch='i386').build().start() as t:
         crash = rex.Crash(t, os.path.join(bin_location, "tests/i386/vuln_stacksmash/vuln_stacksmash"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'),
                 # tracer_args={'ld_linux': os.path.join(bin_location, 'tests/i386/ld-linux.so.2'),
                 #     'library_path': os.path.join(bin_location, 'tests/i386')})
