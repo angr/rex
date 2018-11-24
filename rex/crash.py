@@ -519,18 +519,33 @@ class Crash:
                 ip_address = "localhost"
             else:
                 raise NotImplementedError()
-            _ = NetworkFeeder("tcp", ip_address, self.target_port, input_data)
+            nf = NetworkFeeder("tcp", ip_address, self.target_port, input_data)
         elif self.input_type == CrashInputType.UDP:
-            raise NotImplementedError()
+            raise NotImplementedError('UDP is not supported yet.')
+        else:
+            raise NotImplementedError('Input type %s is not supported yet.' % self.input_type)
 
-        r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, timeout=self.trace_timeout,
-                                                          save_core=True, **tracer_args
-                                                          )
         if not self.core_registers:
+            with archr.arsenal.CoreBow(self.target).fire_context(timeout=self.trace_timeout, aslr=False,
+                                                                 **tracer_args) as r:
+                # Fire it once to get a core on the native target
+                thread_id = nf.fire()
+                nf.join(thread_id)
+                # Now it's done
+
             # If a coredump is available, save a copy of all registers in the coredump for future references
-            if os.path.isfile(r.core_path):
-                tiny_core = tracer.TinyCore(r.core_path)
+            if os.path.isfile(r.local_core_path):
+                tiny_core = tracer.TinyCore(r.local_core_path)
                 self.core_registers = tiny_core.registers
+            else:
+                l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
+                        r.local_core_path)
+
+        nf.fire()
+        r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, timeout=self.trace_timeout,
+                                                          save_core=False, **tracer_args
+                                                          )
+
 
         if self.initial_state is None:
             self.initial_state = self._create_initial_state(input_data,
