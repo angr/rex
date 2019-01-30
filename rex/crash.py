@@ -891,10 +891,7 @@ class QuickCrash:
         if r.os != "cgc":
             raise ValueError("QuickCrash is only available for CGC binaries")
 
-        if r.is_multicb:
-            project = angr.Project(binary[r.crashed_binary])
-        else:
-            project = angr.Project(binary)
+        project = angr.Project(binary)
 
         # triage the crash based of the register values and memory at crashtime
         # look for the most valuable crashes first
