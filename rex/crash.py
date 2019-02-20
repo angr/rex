@@ -34,9 +34,9 @@ class Crash:
     """
 
     def __init__(self, target, crash=None, pov_file=None, aslr=None, constrained_addrs=None,
-                 hooks=None, format_infos=None,
-                 explore_steps=0, trace_timeout=10,
-                 input_type=CrashInputType.STDIN, port=None, use_crash_input=False, tracer_args=None,
+                 hooks=None, format_infos=None, tracer_bow=None,
+                 explore_steps=0,
+                 input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
                  checkpoint_path=None,
                  #
                  # angrop-related settings
@@ -57,9 +57,9 @@ class Crash:
                                     to simprocedures.
         :param format_infos:        A list of atoi FormatInfo objects that should
                                     be used when analyzing the crash.
+        :param tracer_bow:          The bow instance to use for tracing operations
         :param explore_steps:       Number of steps which have already been explored, should
                                     only set by exploration methods.
-        :param trace_timeout:       Time the tracing operation out after this number of seconds.
         :param checkpoint_path:     Path to a checkpoint file that provides initial_state, prev_state, crash_state, and
                                     so on.
 
@@ -83,10 +83,7 @@ class Crash:
         self.input_type = input_type
         self.target_port = port
         self.crash = crash
-        self.trace_timeout = trace_timeout
-
-        if tracer_args is None:
-            tracer_args = {}
+        self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
 
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
@@ -157,7 +154,6 @@ class Crash:
         if not traced:
             # Begin tracing!
             self._trace(pov_file=pov_file,
-                        tracer_args=tracer_args,
                         format_infos=format_infos,
                         )
 
@@ -386,6 +382,7 @@ class Crash:
     def copy(self):
         cp = Crash.__new__(Crash)
         cp.target = self.target
+        cp.tracer_bow = self.tracer_bow
         cp.binary = self.binary
         cp.crash = self.crash
         cp.input_type = self.input_type
@@ -482,16 +479,15 @@ class Crash:
     # Private methods
     #
 
-    def _trace(self, pov_file=None, tracer_args=None, format_infos=None):
+    def _trace(self, pov_file=None, format_infos=None):
 
         # faster place to check for non-crashing inputs
 
         # optimized crash check
         if self.os == 'cgc':
-            r = archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, record_magic=True, testcase=self.crash, **tracer_args)
+            r = self.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash)
             if not r.crashed:
-                if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash,
-                                                                     report_bad_args=True, **tracer_args).crashed:
+                if not self.tracer_bow.fire(save_core=True, testcase=self.crash, report_bad_args=True).crashed:
                     l.warning("input did not cause a crash")
                     raise NonCrashingInput
             cgc_flag_page_magic = r.magic_contents
@@ -551,14 +547,12 @@ class Crash:
         thread_id = None
         if nf is not None:
             thread_id = nf.fire()
-        r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, timeout=self.trace_timeout, save_core=False, **tracer_args)
+        r = self.tracer_bow.fire(testcase=input_data, save_core=False)
         if nf is not None:
             nf.join(thread_id)
 
         if self.initial_state is None:
-            self.initial_state = self._create_initial_state(input_data,
-                                                            cgc_flag_page_magic=cgc_flag_page_magic,
-                                                            )
+            self.initial_state = self._create_initial_state(input_data, cgc_flag_page_magic=cgc_flag_page_magic)
 
         simgr = self.project.factory.simulation_manager(
             self.initial_state,
@@ -567,8 +561,7 @@ class Crash:
             save_unconstrained=r.crashed
         )
 
-        self._t = angr.exploration_techniques.Tracer(trace=r.trace, resiliency=False, keep_predecessors=2,
-                                                     crash_addr=r.crash_address)
+        self._t = r.tracer_technique(keep_predecessors=2)
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
 
@@ -698,6 +691,7 @@ class Crash:
         use_rop = False if self.rop is None else True
         self.__init__(self.target,
                 new_input,
+                tracer_bow=self.tracer_bow,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
                 use_rop=use_rop,
@@ -752,6 +746,7 @@ class Crash:
         use_rop = False if self.rop is None else True
         self.__init__(self.target,
                 new_input,
+                tracer_bow=self.tracer_bow,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
                 use_rop=use_rop,
