@@ -34,7 +34,7 @@ class Crash:
     Triage and exploit a crash using angr.
     """
 
-    def __init__(self, target, binary, crash=None, pov_file=None, aslr=None, constrained_addrs=None,
+    def __init__(self, target, crash=None, pov_file=None, aslr=None, constrained_addrs=None,
                  hooks=None, format_infos=None,
                  explore_steps=0, trace_timeout=10,
                  input_type=CrashInputType.STDIN, port=None, use_crash_input=False, tracer_args=None,
@@ -49,7 +49,6 @@ class Crash:
                  prev_path=None, crash_state=None, initial_state=None):
         """
         :param target:              archr Target that contains the binary that crashed.
-        :param binary:              Local path to the binary which crashed.
         :param crash:               String of input which crashed the binary.
         :param pov_file:            CGC PoV describing a crash.
         :param aslr:                Analyze the crash with aslr on or off.
@@ -77,8 +76,7 @@ class Crash:
         :param prev_path:           Path leading up to the crashing block.
         """
 
-        self.target = target
-        self.binary = binary
+        self.target = target # type: archr.targets.Target
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.hooks = {} if hooks is None else hooks
         self.explore_steps = explore_steps
@@ -98,6 +96,7 @@ class Crash:
         dsb = archr.arsenal.DataScoutBow(self.target)
         self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
         self.project = self.angr_project_bow.fire()
+        self.binary = self.target.resolve_local_path(self.target.target_path)
 
         # Add custom hooks
         for addr, proc in self.hooks.items():
@@ -114,7 +113,7 @@ class Crash:
                     # hash binary contents for rop cache name
                     binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
                     rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
-                self._rop = self._initialize_rop(fast_mode=fast_mode, rop_cache_tuple=rop_cache_tuple,
+                self.rop = self._initialize_rop(fast_mode=fast_mode, rop_cache_tuple=rop_cache_tuple,
                                                  rop_cache_path=rop_cache_path)
         else:
             self.rop = None
@@ -511,6 +510,8 @@ class Crash:
         else:
             input_data = self.crash
 
+        nf = None
+        stdin_data = None
         if self.input_type == CrashInputType.TCP:
             # Feed input to the QEMURunner
             if isinstance(self.target, archr.targets.DockerImageTarget):
@@ -522,30 +523,38 @@ class Crash:
             nf = NetworkFeeder("tcp", ip_address, self.target_port, input_data)
         elif self.input_type == CrashInputType.UDP:
             raise NotImplementedError('UDP is not supported yet.')
+        elif self.input_type == CrashInputType.STDIN:
+            stdin_data = input_data
         else:
             raise NotImplementedError('Input type %s is not supported yet.' % self.input_type)
 
-        if not self.core_registers:
-            with archr.arsenal.CoreBow(self.target).fire_context(timeout=self.trace_timeout, aslr=False,
-                                                                 **tracer_args) as r:
-                # Fire it once to get a core on the native target
-                thread_id = nf.fire()
-                nf.join(thread_id)
-                # Now it's done
+        # who the fuck do you think you are I am!!!
+        #if not self.core_registers:
+        #    with archr.arsenal.CoreBow(self.target).fire_context(timeout=self.trace_timeout, aslr=False,
+        #                                                         **tracer_args) as r:
+        #        # Fire it once to get a core on the native target
+        #        if nf is not None:
+        #            thread_id = nf.fire()
+        #            nf.join(thread_id)
+        #        if stdin_data is not None:
+        #            r.p.stdin.write(stdin_data)
+        #            r.p.stdin.close()
+        #        # Now it's done
 
-            # If a coredump is available, save a copy of all registers in the coredump for future references
-            if os.path.isfile(r.local_core_path):
-                tiny_core = tracer.TinyCore(r.local_core_path)
-                self.core_registers = tiny_core.registers
-            else:
-                l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
-                        r.local_core_path)
+        #    # If a coredump is available, save a copy of all registers in the coredump for future references
+        #    if os.path.isfile(r.local_core_path):
+        #        tiny_core = tracer.TinyCore(r.local_core_path)
+        #        self.core_registers = tiny_core.registers
+        #    else:
+        #        l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
+        #                r.local_core_path)
 
-        nf.fire()
-        r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, timeout=self.trace_timeout,
-                                                          save_core=False, **tracer_args
-                                                          )
-
+        thread_id = None
+        if nf is not None:
+            thread_id = nf.fire()
+        r = archr.arsenal.QEMUTracerBow(self.target).fire(testcase=input_data, timeout=self.trace_timeout, save_core=False, **tracer_args)
+        if nf is not None:
+            nf.join(thread_id)
 
         if self.initial_state is None:
             self.initial_state = self._create_initial_state(input_data,

@@ -85,13 +85,9 @@ def break_controlled_printf():#L90
 
     nose.tools.assert_true(_do_pov_test(pov, enable_randomness=False))
 
-def setup_module():
-    os.system("cd %s/tests/i386; ./build_all.sh" % bin_location)
-    
 
 def test_shellcode_placement():
-    setup_module()
-    
+
     # Test that shellcode is placed in only executable memory regions.
 
     crash = b"A" * 272
@@ -175,13 +171,12 @@ def test_linux_stacksmash():
     # Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
     # ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
 
-    setup_module()
     crash = b"A" * 227
-    with archr.targets.DockerImageTarget('angr-test:vuln_stacksmash', target_arch='i386').build().start() as t:
-        crash = rex.Crash(t, os.path.join(bin_location, "tests/i386/vuln_stacksmash/vuln_stacksmash"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'),
-                # tracer_args={'ld_linux': os.path.join(bin_location, 'tests/i386/ld-linux.so.2'),
-                #     'library_path': os.path.join(bin_location, 'tests/i386')})
-                tracer_args={'library_path': os.path.join(bin_location, 'tests/i386')})
+    path = os.path.join(bin_location, "tests/i386/vuln_stacksmash")
+    with archr.targets.LocalTarget([path], target_arch='i386').build().start() as t:
+        crash = rex.Crash(t, crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'),
+                tracer_args={'ld_linux': os.path.join(bin_location, 'tests/i386/ld-linux.so.2'),
+                    'library_path': os.path.join(bin_location, 'tests/i386')})
 
         exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
@@ -370,7 +365,8 @@ def run_all():
 if __name__ == "__main__":
     logging.getLogger("rex").setLevel("DEBUG")
     logging.getLogger("povsim").setLevel("DEBUG")
-    logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
+    logging.getLogger('archr').setLevel('DEBUG')
+    #logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
     logging.getLogger("angr.simos").setLevel("DEBUG")
     logging.getLogger("angr.exploration_techniques.tracer").setLevel("DEBUG")
     logging.getLogger("angr.exploration_techniques.crash_monitor").setLevel("DEBUG")
