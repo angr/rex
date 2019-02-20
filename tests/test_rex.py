@@ -179,11 +179,11 @@ def test_linux_stacksmash():
     # ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
 
     inp = b"A" * 227
-    path = os.path.join(bin_location, "tests/i386/vuln_stacksmash")
-    with archr.targets.LocalTarget([path], target_arch='i386').build().start() as target:
-        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'),
-                tracer_args={'ld_linux': os.path.join(bin_location, 'tests/i386/ld-linux.so.2'),
-                    'library_path': os.path.join(bin_location, 'tests/i386')})
+    lib_path = os.path.join(bin_location, "tests/i386")
+    ld_path = os.path.join(lib_path, "ld-linux.so.2")
+    path = os.path.join(lib_path, "vuln_stacksmash")
+    with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='i386').build().start() as target:
+        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'))
 
         exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
         crash.project.loader.close()
