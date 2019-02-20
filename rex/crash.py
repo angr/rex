@@ -488,14 +488,13 @@ class Crash:
 
         # optimized crash check
         if self.os == 'cgc':
-            r = archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash, **tracer_args)
-            if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash,
-                                                                 **tracer_args).crashed:
+            r = archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, record_magic=True, testcase=self.crash, **tracer_args)
+            if not r.crashed:
                 if not archr.arsenal.QEMUTracerBow(self.target).fire(save_core=True, testcase=self.crash,
                                                                      report_bad_args=True, **tracer_args).crashed:
                     l.warning("input did not cause a crash")
                     raise NonCrashingInput
-            cgc_flag_page_magic = r.magic
+            cgc_flag_page_magic = r.magic_contents
         else:
             cgc_flag_page_magic = None
 

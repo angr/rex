@@ -91,10 +91,11 @@ def test_shellcode_placement():
     # Test that shellcode is placed in only executable memory regions.
 
     crash = b"A" * 272
+    path = os.path.join(bin_location, "tests/cgc/shellcode_tester")
 
-    with archr.targets.DockerImageTarget('angr-test:shellcode_tester').build().start() as t:
+    with archr.targets.LocalTarget([path], target_os='cgc').build().start() as t:
     
-        crash = rex.Crash(t, os.path.join(bin_location, "tests/i386/shellcode_tester/shellcode_tester"), crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'shellcode_tester'))
+        crash = rex.Crash(t, crash, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'shellcode_tester'))
 
         arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
 
@@ -106,8 +107,8 @@ def test_shellcode_placement():
 
         exec_regions = list(filter(lambda a: crash.state.solver.eval(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem))
 
-        crash.project.close()
-        
+        crash.project.loader.close()
+
         # should just be two executable regions
         nose.tools.assert_equal(len(exec_regions), 2)
 
