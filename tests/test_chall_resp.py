@@ -1,5 +1,6 @@
 import rex
 import angr
+import archr
 import nose
 import flaky
 from angr.state_plugins.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt
@@ -9,12 +10,6 @@ bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
 
 import logging
-logging.getLogger("rex").setLevel("DEBUG")
-logging.getLogger("povsim").setLevel("DEBUG")
-logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
-logging.getLogger("angr.simos").setLevel("DEBUG")
-logging.getLogger("angr.exploration_techniques.tracer").setLevel("DEBUG")
-logging.getLogger("angr.exploration_techniques.crash_monitor").setLevel("DEBUG")
 
 def _do_pov_test(pov, enable_randomness=True):
     """ Test a POV """
@@ -47,31 +42,39 @@ def break_chall_resp_atoi():
 
 
 def test_chall_response():
-    crash_input = b"\x63\xbd\x66\xfd" + \
-                  b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
-                  b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
-                  b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
-    crash = rex.Crash(bin_location + "/tests/i386/overflow_after_challenge_response2", crash=crash_input,
-			          rop_cache_path=os.path.join(cache_location, "overflow_after_challenge_response2"))
-    exploit_f = crash.exploit()
-    for e in exploit_f.register_setters:
-        nose.tools.assert_true(_do_pov_test(e))
-    for e in exploit_f.leakers:
-        nose.tools.assert_true(_do_pov_test(e))
+    inp = b"\x63\xbd\x66\xfd" + \
+          b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+          b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+          b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+    path = bin_location + "/tests/cgc/overflow_after_challenge_response2"
+
+    with archr.targets.LocalTarget([path], target_os='cgc') as target:
+        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, "overflow_after_challenge_response2"))
+        exploit_f = crash.exploit()
+        crash.project.loader.close()
+
+        for e in exploit_f.register_setters:
+            nose.tools.assert_true(_do_pov_test(e))
+        for e in exploit_f.leakers:
+            nose.tools.assert_true(_do_pov_test(e))
 
 @flaky.flaky(3, 1)
 def test_chall_resp_rand():
-    crash_input = b" (((" \
-                  b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
-                  b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
-                  b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
-    crash = rex.Crash(bin_location + "/tests/i386/overflow_after_chall_resp_rand", crash=crash_input,
-			          rop_cache_path=os.path.join(cache_location, "overflow_after_chall_resp_rand"))
-    exploit_f = crash.exploit()
-    for e in exploit_f.register_setters:
-        nose.tools.assert_true(_do_pov_test(e))
-    for e in exploit_f.leakers:
-        nose.tools.assert_true(_do_pov_test(e))
+    inp = b" (((" \
+          b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+          b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+          b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+    path = bin_location + "/tests/cgc/overflow_after_chall_resp_rand"
+
+    with archr.targets.LocalTarget([path], target_os='cgc') as target:
+        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, "overflow_after_chall_resp_rand"))
+        exploit_f = crash.exploit()
+        crash.project.loader.close()
+
+        for e in exploit_f.register_setters:
+            nose.tools.assert_true(_do_pov_test(e))
+        for e in exploit_f.leakers:
+            nose.tools.assert_true(_do_pov_test(e))
 
 
 def run_all():
@@ -82,10 +85,15 @@ def run_all():
             all_functions[f]()
 
 if __name__ == "__main__":
+    logging.getLogger("rex").setLevel("DEBUG")
+    logging.getLogger("povsim").setLevel("DEBUG")
+    logging.getLogger('archr').setLevel("DEBUG")
+    #logging.getLogger("angr.state_plugins.preconstrainer").setLevel("DEBUG")
+    logging.getLogger("angr.simos").setLevel("DEBUG")
+    logging.getLogger("angr.exploration_techniques.tracer").setLevel("DEBUG")
+    logging.getLogger("angr.exploration_techniques.crash_monitor").setLevel("DEBUG")
     import sys
     if len(sys.argv) > 1:
         globals()['test_' + sys.argv[1]]()
     else:
         run_all()
-
-

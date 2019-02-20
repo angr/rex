@@ -1,4 +1,5 @@
 import rex
+import archr
 import nose
 
 import os
@@ -9,12 +10,16 @@ def test_write_what_where_shadowstack():
     """
     Test that our write what where exploit can leak, and works in the presence of a shadowstack
     """
-    crash_str = b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
-    crash = rex.Crash(os.path.join(bin_location + "/tests/i386/write_what_where_shadow_stack"), crash_str,
-			          rop_cache_path=os.path.join(cache_location, "write_what_where_shadow_stack"))
-    arsenal = crash.exploit()
-    exploit = arsenal.best_type2
-    nose.tools.assert_true(exploit.test_binary())
+    inp = b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+    path = os.path.join(bin_location, "tests/cgc/write_what_where_shadow_stack")
+
+    with archr.targets.LocalTarget([path], target_os='cgc') as target:
+        crash = rex.Crash(target, inp, rop_cache_path=os.path.join(cache_location, "write_what_where_shadow_stack"))
+        arsenal = crash.exploit()
+        crash.project.loader.close()
+
+        exploit = arsenal.best_type2
+        nose.tools.assert_true(exploit.test_binary())
 
 def run_all():
     functions = globals()

@@ -385,6 +385,7 @@ class Crash:
 
     def copy(self):
         cp = Crash.__new__(Crash)
+        cp.target = self.target
         cp.binary = self.binary
         cp.crash = self.crash
         cp.input_type = self.input_type
@@ -695,7 +696,7 @@ class Crash:
 
         # create a new crash object starting here
         use_rop = False if self.rop is None else True
-        self.__init__(self.binary,
+        self.__init__(self.target,
                 new_input,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
@@ -749,7 +750,7 @@ class Crash:
                 f.write(new_input)
 
         use_rop = False if self.rop is None else True
-        self.__init__(self.binary,
+        self.__init__(self.target,
                 new_input,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
@@ -781,7 +782,6 @@ class Crash:
         self.flag_mem = self._segment(flag_writes)
 
     def _triage_crash(self):
-        import ipdb; ipdb.set_trace()
         ip = self.state.regs.ip
         bp = self.state.regs.bp
 
