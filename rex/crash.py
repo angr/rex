@@ -1,7 +1,6 @@
 import os
 import angr
 import random
-import tracer
 import hashlib
 import logging
 import operator
@@ -782,6 +781,7 @@ class Crash:
         self.flag_mem = self._segment(flag_writes)
 
     def _triage_crash(self):
+        import ipdb; ipdb.set_trace()
         ip = self.state.regs.ip
         bp = self.state.regs.bp
 
@@ -1032,163 +1032,3 @@ class Crash:
         segments[current_w_start] = current_w_end - current_w_start
 
         return segments
-
-
-class QuickCrash:
-
-    def __init__(self, binary, crash, argv=None):
-        """
-        Quickly triage a crash with just QEMU. Less accurate, but much faster.
-        :param binary: Path to binary which crashed.
-        :param crash : Input which caused crash.
-        :param argv  : Optionally specify argv params (i,e,: ['./calc', 'parm1']).
-        """
-
-        self.binary = binary
-
-        self.crash = crash
-
-        self.bb_count = None
-        self.crash_pc, self.kind = self._quick_triage(binary, crash, argv=argv)
-
-    def _quick_triage(self, binary, crash, argv=None):
-
-        l.debug("quick triaging crash against '%s'", binary)
-
-        arbitrary_syscall_arg = False
-        r = tracer.QEMURunner(binary, crash, record_trace=True, use_tiny_core=True, record_core=True, argv=argv)
-
-        self.bb_count = len(r.trace)
-
-        if not r.crash_mode:
-
-            # try again to catch bad args
-            r = tracer.QEMURunner(binary, crash, report_bad_args=True, record_core=True, argv=argv)
-            arbitrary_syscall_arg = True
-            if not r.crash_mode:
-                raise NonCrashingInput("input did not cause a crash")
-
-            l.debug("detected an arbitrary transmit or receive")
-
-        if r.os != "cgc":
-            raise ValueError("QuickCrash is only available for CGC binaries")
-
-        project = angr.Project(binary)
-
-        # triage the crash based of the register values and memory at crashtime
-        # look for the most valuable crashes first
-
-        pc = r.reg_vals['eip']
-        l.debug('crash occured at %#x', pc)
-
-        if arbitrary_syscall_arg:
-            l.debug("checking which system call had bad args")
-
-            syscall_num = r.reg_vals['eax']
-            vulns = {2: Vulnerability.ARBITRARY_TRANSMIT,
-                     3: Vulnerability.ARBITRARY_RECEIVE}
-
-            # shouldn't ever happen but in case it does
-            if syscall_num not in vulns:
-                return pc, None
-
-            return pc, vulns[syscall_num]
-
-        l.debug("checking if ip is null")
-        if pc < 0x1000:
-            return pc, Vulnerability.NULL_DEREFERENCE
-
-        l.debug("checking if ip register points to executable memory")
-
-        if project.loader.main_object.os == 'cgc':
-            start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS}, remove_options={so.SIMPLIFY_MEMORY_WRITES})
-        elif project.loader.main_object.os.startswith('UNIX'):
-            start_state = project.factory.entry_state(addr=pc, add_options={so.TRACK_MEMORY_ACTIONS}, remove_options={so.SIMPLIFY_MEMORY_WRITES}, args=argv)
-        else:
-            raise ValueError("Can't analyse OS %s" % project.loader.main_object.os)
-
-        # was ip mapped?
-        ip_overwritten = False
-        try:
-            perms = start_state.memory.permissions(pc)
-            # check if the execute bit is marked, this is an AST
-            l.debug("ip points to mapped memory")
-            if not perms.symbolic and not ((perms & 4) == 4).args[0]:
-                l.debug("ip appears to be uncontrolled")
-                return pc, Vulnerability.UNCONTROLLED_IP_OVERWRITE
-
-        except angr.SimMemoryError:
-            ip_overwritten = True
-
-        if ip_overwritten:
-            # let's see if we can classify it as a partial overwrite
-            # this is done by seeing if the most signifigant bytes of
-            # pc could be a mapping
-            cgc_object = project.loader.all_elf_objects[0]
-            base = cgc_object.min_addr & 0xff000000
-            while base < cgc_object.max_addr:
-                if pc & 0xff000000 == base:
-                    l.debug("ip appears to only be partially controlled")
-                    return pc, Vulnerability.PARTIAL_IP_OVERWRITE
-                base += 0x01000000
-
-            l.debug("ip appears to be completely controlled")
-            return pc, Vulnerability.IP_OVERWRITE
-
-        # wasn't an ip overwrite, check reads and writes
-        l.debug("checking if a read or write caused the crash")
-
-        # set registers
-        start_state.regs.eax = r.reg_vals['eax']
-        start_state.regs.ebx = r.reg_vals['ebx']
-        start_state.regs.ecx = r.reg_vals['ecx']
-        start_state.regs.edx = r.reg_vals['edx']
-        start_state.regs.esi = r.reg_vals['esi']
-        start_state.regs.edi = r.reg_vals['edi']
-        start_state.regs.esp = r.reg_vals['esp']
-        start_state.regs.ebp = r.reg_vals['ebp']
-
-        next_pth = project.factory.successors(start_state, num_inst=1).successors[0]
-
-        posit = None
-        for a in next_pth.history.recent_actions:
-            if a.type == 'mem':
-
-                target_addr = start_state.solver.eval(a.addr)
-                if target_addr < 0x1000:
-                    l.debug("attempt to write or read to address of NULL")
-                    return pc, Vulnerability.NULL_DEREFERENCE
-
-                # we will take the last memory action, so things like an `add` instruction
-                # are triaged as a 'write' opposed to a 'read'
-                if a.action == 'write':
-                    l.debug("write detected")
-                    posit = Vulnerability.WRITE_WHAT_WHERE
-                    # if it's trying to write to a non-writeable address which is mapped
-                    # it's most likely uncontrolled
-                    if target_addr & 0xfff00000 == 0:
-                        l.debug("write attempt at a suspiciously small address, assuming uncontrolled")
-                        return pc, Vulnerability.UNCONTROLLED_WRITE
-
-                    try:
-                        perms = start_state.memory.permissions(target_addr)
-                        if not perms.symbolic and not ((perms & 2) == 2).args[0]:
-                            l.debug("write attempt at a read-only page, assuming uncontrolled")
-                            return pc, Vulnerability.UNCONTROLLED_WRITE
-
-                    except angr.SimMemoryError:
-                        pass
-
-                elif a.action == 'read':
-                    l.debug("read detected")
-                    posit = Vulnerability.ARBITRARY_READ
-                else:
-                    # sanity checking
-                    raise ValueError("unrecognized memory action encountered %s" % a.action)
-
-        if posit is None:
-            l.debug("crash was not able to be triaged")
-            posit = 'unknown'
-
-        # returning 'unknown' if crash does not fall into one of our obvious categories
-        return pc, posit
