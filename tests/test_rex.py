@@ -22,6 +22,13 @@ def _do_pov_test(pov, enable_randomness=True):
             return True
     return False
 
+def _check_arsenal_has_send(arsenal):
+    # Test that the script generated for the arsenal has sends (i.e. is not null)
+    for exploit in arsenal.values():
+        exploit.script()
+        assert "r.send" in exploit._script_string
+
+
 def test_legit_00001():
     # Test exploitation of legit_00001 given a good crash.
 
@@ -174,6 +181,8 @@ def break_cpp_vptr_smash():#L165
     for leaker in arsenal.leakers:
         nose.tools.assert_true(_do_pov_test(leaker))
 
+    _check_arsenal_has_send(arsenal)
+
 def test_linux_stacksmash():
     # Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
     # ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
@@ -193,6 +202,8 @@ def test_linux_stacksmash():
         assert 'rop_to_system' in exploit.arsenal
         assert 'call_shellcode' in exploit.arsenal
         assert 'call_jmp_sp_shellcode' in exploit.arsenal
+
+        _check_arsenal_has_send(exploit.arsenal)
 
     # TODO test exploit with pwntool's 'process'
 
