@@ -224,18 +224,17 @@ class Crash:
             opts = kwargs.get('shellcode_opts', {})
             # are there open sockets that can receive our input?
             try:
-                open_fds = {'fd': next(fd for fd in self.state.posix.fd if
-                            self.state.posix.fd[fd].read_storage.ident.startswith('aeg_stdin') and
-                            self.state.solver.eval(self.state.posix.fd[fd].read_storage.pos) > 0)
-                }
+                open_fd = next(fd for fd, simfd in self.state.posix.fd.items() if
+                            simfd.read_storage.ident.startswith('aeg_stdin') and
+                            self.state.solver.eval(simfd.read_storage.pos) > 0)
             except StopIteration:
-                open_fds = { }
+                open_fd = None
 
-            if open_fds:
+            if open_fd is not None:
                 # there is an open socket
                 # try dupsh to get a shell
                 opts['default'] = 'dupsh'
-                opts['shellcode_args'] = open_fds
+                opts['shellcode_args'] = {'fd': open_fd}
 
             kwargs['shellcode_opts'] = opts
 
