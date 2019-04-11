@@ -365,11 +365,13 @@ class Crash:
 
         return control
 
-    def stack_control(self):
+    def stack_control(self, below_sp=True):
         """
-        determine what symbolic memory we control equal to or beneath the stack pointer
+        determine what symbolic memory we control on the stack.
 
-        :return:        A mapping from address to length of data controlled at that address
+        :param bool below_sp:   True if we only want to find the number of symbolic bytes equal to or beneath the stack
+                                pointer.
+        :return:                A mapping from address to length of data controlled at that address
         """
 
         control = { }
@@ -385,13 +387,18 @@ class Crash:
             if addr > sp_base:
                 continue
 
-            # if the region is below sp it gets added
-            elif addr > sp:
-                control[addr] = self.symbolic_mem[addr]
+            else:
+                if below_sp:
+                    # if the region is below sp it gets added
+                    if addr > sp:
+                        control[addr] = self.symbolic_mem[addr]
 
-            # if sp falls into the region it gets added starting at sp
-            elif addr + self.symbolic_mem[addr] > sp:
-                control[sp] = addr + self.symbolic_mem[addr] - sp
+                    # if sp falls into the region it gets added starting at sp
+                    elif addr + self.symbolic_mem[addr] > sp:
+                        control[sp] = addr + self.symbolic_mem[addr] - sp
+
+                else:
+                    control[addr] = self.symbolic_mem[addr]
 
         return control
 
