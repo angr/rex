@@ -219,8 +219,21 @@ class Crash:
 
         if self.input_type == CrashInputType.TCP:
             opts = kwargs.get('shellcode_opts', {})
-            opts['default'] = 'dupsh'
-            opts['shellcode_args'] = {'fd': next(fd for fd in self.state.posix.fd if self.state.posix.fd[fd].read_storage.ident == 'aeg_stdin')}
+            # are there open sockets that can receive our input?
+            try:
+                open_fds = {'fd': next(fd for fd in self.state.posix.fd if
+                            self.state.posix.fd[fd].read_storage.ident.startswith('aeg_stdin') and
+                            self.state.solver.eval(self.state.posix.fd[fd].read_storage.pos) > 0)
+                }
+            except StopIteration:
+                open_fds = { }
+
+            if open_fds:
+                # there is an open socket
+                # try dupsh to get a shell
+                opts['default'] = 'dupsh'
+                opts['shellcode_args'] = open_fds
+
             kwargs['shellcode_opts'] = opts
 
         if self.os == 'cgc':
