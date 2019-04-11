@@ -823,7 +823,7 @@ class Crash:
             state = self.state
         for a in recent_actions:
             if a.type == 'mem':
-                if self.state.solver.symbolic(a.addr):
+                if self.state.solver.symbolic(a.addr.ast):
                     symbolic_actions.append(a)
 
         # TODO: pick the crashing action based off the crashing instruction address,
