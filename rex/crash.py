@@ -18,6 +18,7 @@ from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFac
 from .vulnerability import Vulnerability
 from .network_feeder import NetworkFeeder
 from .enums import CrashInputType
+from .preconstrained_file_stream import SimPreconstrainedFileStream
 
 
 l = logging.getLogger("rex.Crash")
@@ -153,6 +154,8 @@ class Crash:
         self._t = None  # The angr.exploration_techniques.Tracer object. Will be created during self._trace()
         if not traced:
             # Begin tracing!
+            self._preconstraining_input_data = None
+            self._has_preconstrained = False
             self._trace(pov_file=pov_file,
                         format_infos=format_infos,
                         )
@@ -600,14 +603,25 @@ class Crash:
 
         socket_queue = None
         stdin_file = None  # the file that will be fd 0
-        input_file = None  # the file that we want to preconstrain
 
         if self.input_type == CrashInputType.TCP:
-            input_file = input_sock = SimFileStream(name="aeg_tcp_in", ident='aeg_stdin')
-            output_sock = SimFileStream(name="aeg_tcp_out")
-            socket_queue = [None, None, None, (input_sock, output_sock)]  # FIXME THIS IS A HACK
+            socket_queue = [ ]
+            for i in range(10):
+                # Initialize the first N socket pairs
+                input_sock = SimPreconstrainedFileStream(
+                    preconstraining_handler=self._preconstrain_file,
+                    name="aeg_tcp_in_%d" % i,
+                    ident='aeg_stdin_%d' % i
+                )
+                output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
+                socket_queue.append([input_sock, output_sock])
         else:
-            input_file = stdin_file = SimFileStream(name='stdin', ident='aeg_stdin')
+            stdin_file = SimPreconstrainedFileStream(
+                preconstraining_handler=self._preconstrain_file,
+                name='stdin',
+                ident='aeg_stdin'
+            )
+        self._preconstraining_input_data = input_data
 
         state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
         initial_state = state_bow.fire(
@@ -629,7 +643,6 @@ class Crash:
         ))
 
         initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-        initial_state.preconstrainer.preconstrain_file(input_data, input_file, set_length=True)
         if self.is_cgc:
             initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
 
@@ -640,6 +653,15 @@ class Crash:
         initial_state.libc.max_buffer_size = 16384
 
         return initial_state
+
+    def _preconstrain_file(self, fstream):
+        if not self._has_preconstrained:
+            l.info("Preconstraining file stream %s upon the first read()." % fstream)
+            self._has_preconstrained = True
+            fstream.state.preconstrainer.preconstrain_file(self._preconstraining_input_data, fstream, set_length=True)
+        else:
+            l.error("Preconstraining is attempted twice, but currently Rex only supports preconstraining one file. "
+                    "Ignored.")
 
     def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a
