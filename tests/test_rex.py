@@ -183,7 +183,27 @@ def break_cpp_vptr_smash():#L165
 
     _check_arsenal_has_send(arsenal)
 
-def test_linux_stacksmash():
+def test_linux_stacksmash_64():
+    # Test exploiting a simple linux 64-bit program with a stack buffer overflow. We should be able to exploit the test binary by
+    # ropping to 'system', calling shellcode in the BSS, and calling 'jmpsp' shellcode in the BSS.
+
+    inp = b"A" * 250
+    lib_path = os.path.join(bin_location, "tests/x86_64")
+    ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
+    path = os.path.join(lib_path, "vuln_stacksmash")
+    with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='x86_64').build().start() as target:
+        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
+
+        exploit = crash.exploit()
+        crash.project.loader.close()
+
+        # make sure we're able to exploit it to call shellcode
+        assert 'call_shellcode' in exploit.arsenal
+
+        _check_arsenal_has_send(exploit.arsenal)
+
+
+def test_linux_stacksmash_32():
     # Test exploiting a simple linux program with a stack buffer overflow. We should be able to exploit the test binary by
     # ropping to 'system', calling shellcode in the BSS and calling 'jmpsp' shellcode in the BSS.
 
@@ -204,8 +224,6 @@ def test_linux_stacksmash():
         assert 'call_jmp_sp_shellcode' in exploit.arsenal
 
         _check_arsenal_has_send(exploit.arsenal)
-
-    # TODO test exploit with pwntool's 'process'
 
 def test_cgc_type1_rop_stacksmash():
     # Test creation of type1 exploit on 0b32aa01_01 ('Palindrome') with rop. The vulnerability exposed by the string `crash` is
