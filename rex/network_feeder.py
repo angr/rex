@@ -57,6 +57,7 @@ class NetworkFeeder:
             sock.connect((self._host, self._port))
 
             sock.send(self._data)
+            sock.recv(1024)
 
             sock.close()
         except Exception:
