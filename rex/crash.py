@@ -678,7 +678,7 @@ class Crash:
         if not self._has_preconstrained:
             l.info("Preconstraining file stream %s upon the first read()." % fstream)
             self._has_preconstrained = True
-            fstream.state.preconstrainer.preconstrain_file(self._preconstraining_input_data, fstream, set_length=True)
+            fstream.state.preconstrainer.preconstrain_file([self._preconstraining_input_data], fstream, set_length=True)
         else:
             l.error("Preconstraining is attempted twice, but currently Rex only supports preconstraining one file. "
                     "Ignored.")
