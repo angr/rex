@@ -1,5 +1,9 @@
 import os
+import random
+import subprocess
 import sys
+import tempfile
+import time
 import nose
 import struct
 import logging
@@ -224,6 +228,45 @@ def test_linux_stacksmash_32():
         assert 'call_jmp_sp_shellcode' in exploit.arsenal
 
         _check_arsenal_has_send(exploit.arsenal)
+
+def test_linux_network_stacksmash_64():
+    # Test exploiting a simple network server with a stack-based buffer overflow.
+    inp = b'\x00' * 500
+    lib_path = os.path.join(bin_location, "tests/x86_64")
+    ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
+    path = os.path.join(lib_path, "network_overflow")
+    port = str(random.randint(8000, 9000))
+    with archr.targets.LocalTarget([path, port], path, target_arch='x86_64').build().start() as target:
+        crash = rex.Crash(target, inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False, input_type=rex.enums.CrashInputType.TCP, port=int(port))
+
+        exploit = crash.exploit()
+        crash.project.loader.close()
+
+        assert 'call_shellcode' in exploit.arsenal
+
+        _check_arsenal_has_send(exploit.arsenal)
+
+        # let's actually run the exploit
+
+    new_port = str(random.randint(9001, 10000))
+    with archr.targets.LocalTarget([path, new_port], path, target_arch='x86_64').build().start() as new_target:
+        try:
+            p = new_target.run_command("")
+
+            # wait for the target to load
+            time.sleep(.5)
+            
+            temp_script = tempfile.NamedTemporaryFile(suffix=".py", delete=False)
+            exploit_location = temp_script.name
+            temp_script.close()
+            
+            exploit.arsenal['call_shellcode'].script(exploit_location)
+
+            exploit_result = subprocess.check_output(["python", exploit_location, "127.0.0.1", new_port, "echo hello"])
+            assert b"hello" in exploit_result
+        finally:
+            os.unlink(exploit_location)
+
 
 def test_cgc_type1_rop_stacksmash():
     # Test creation of type1 exploit on 0b32aa01_01 ('Palindrome') with rop. The vulnerability exposed by the string `crash` is
