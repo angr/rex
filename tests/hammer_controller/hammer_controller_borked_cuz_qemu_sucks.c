@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
     puts("Try lift the hammer, go ahead!");
 
     // let them attempt
-    read(0, avenger.buffer, 300);
+    read(0, avenger.buffer, 1024);
     // Assess their worth
     if (!strncmp(avenger.buffer, password, strlen(password)))
     {
