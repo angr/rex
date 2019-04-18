@@ -266,10 +266,7 @@ def test_linux_network_stacksmash_64():
             assert b"hello" in exploit_result
         finally:
             os.unlink(exploit_location)
-            
-            
-    
-    
+
 
 def test_cgc_type1_rop_stacksmash():
     # Test creation of type1 exploit on 0b32aa01_01 ('Palindrome') with rop. The vulnerability exposed by the string `crash` is
