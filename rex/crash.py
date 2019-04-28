@@ -456,7 +456,10 @@ class Crash:
         """
 
         with open(path, "rb") as f:
-            s = pickle.load(f)
+            try:
+                s = pickle.load(f)
+            except EOFError as ex:
+                raise EOFError("Fail to restore from checkpoint %s", path)
 
         keys = {'initial_state',
                 'crash_state',
@@ -906,12 +909,13 @@ class Crash:
 
         rop = self.project.analyses.ROP(fast_mode=fast_mode)
         if rop_cache_tuple is not None:
-            l.info("loading rop gadgets from cache tuple")
+            l.info("Loading rop gadgets from cache tuple...")
             rop._load_cache_tuple(rop_cache_tuple)
         elif os.path.exists(rop_cache_path):
-            l.info("loading rop gadgets from cache '%s'", rop_cache_path)
+            l.info("Loading rop gadgets from cache file %s...", rop_cache_path)
             rop.load_gadgets(rop_cache_path)
         else:
+            l.info("Collecting ROP gadgets... don't panic if you see tons of error messages!")
             if angr.misc.testing.is_testing:
                 rop.find_gadgets_single_threaded(show_progress=False)
             else:
