@@ -12,7 +12,7 @@ from angr.state_plugins.preconstrainer import SimStatePreconstrainer
 from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
 import archr
-from tracer import TracerPoV
+from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from .vulnerability import Vulnerability
@@ -523,56 +523,24 @@ class Crash:
         if pov_file is not None and self.crash is not None:
             raise ValueError("cannot specify both a pov_file and an crash")
 
+        #
+        # Prepare the state and trace
+        #
+
         if pov_file is not None:
             input_data = TracerPoV(pov_file)
         else:
             input_data = self.crash
 
-        nf = None
-        stdin_data = None
-        if self.input_type == CrashInputType.TCP:
-            # Feed input to the QEMURunner
-            if isinstance(self.target, archr.targets.DockerImageTarget):
-                ip_address = self.target.ipv4_address
-            elif isinstance(self.target, archr.targets.LocalTarget):
-                ip_address = "localhost"
-            else:
-                raise NotImplementedError()
-            nf = NetworkFeeder("tcp", ip_address, self.target_port, input_data)
-        elif self.input_type == CrashInputType.UDP:
-            raise NotImplementedError('UDP is not supported yet.')
-        elif self.input_type == CrashInputType.STDIN:
-            stdin_data = input_data
+        r = self.tracer_bow.fire(testcase=input_data, save_core=True)
+
+        # If a coredump is available, save a copy of all registers in the coredump for future references
+        if os.path.isfile(r.core_path):
+            tiny_core = TinyCore(r.core_path)
+            self.core_registers = tiny_core.registers
         else:
-            raise NotImplementedError('Input type %s is not supported yet.' % self.input_type)
-
-        # who the fuck do you think you are I am!!!
-        #if not self.core_registers:
-        #    with archr.arsenal.CoreBow(self.target).fire_context(timeout=self.trace_timeout, aslr=False,
-        #                                                         **tracer_args) as r:
-        #        # Fire it once to get a core on the native target
-        #        if nf is not None:
-        #            thread_id = nf.fire()
-        #            nf.join(thread_id)
-        #        if stdin_data is not None:
-        #            r.p.stdin.write(stdin_data)
-        #            r.p.stdin.close()
-        #        # Now it's done
-
-        #    # If a coredump is available, save a copy of all registers in the coredump for future references
-        #    if os.path.isfile(r.local_core_path):
-        #        tiny_core = tracer.TinyCore(r.local_core_path)
-        #        self.core_registers = tiny_core.registers
-        #    else:
-        #        l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
-        #                r.local_core_path)
-
-        thread_id = None
-        if nf is not None:
-            thread_id = nf.fire()
-        r = self.tracer_bow.fire(testcase=input_data, save_core=False)
-        if nf is not None:
-            nf.join(thread_id)
+            l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
+                    r.local_core_path)
 
         if self.initial_state is None:
             self.initial_state = self._create_initial_state(input_data, cgc_flag_page_magic=cgc_flag_page_magic)
