@@ -24,3 +24,12 @@ class SimPreconstrainedFileStream(SimFileStream):
         copied.preconstraining_handler = self.preconstraining_handler
         copied._attempted_preconstraining = self._attempted_preconstraining
         return copied
+
+    def __setstate__(self, state):
+        for attr, value in state.items():
+            setattr(self, attr, value)
+
+    def __getstate__(self):
+        d = super().__getstate__()
+        d['preconstraining_handler'] = None
+        return d
