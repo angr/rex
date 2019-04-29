@@ -83,17 +83,6 @@ class Crash:
         self._rop_fast_mode = fast_mode
         self._rop_cache_tuple = rop_cache_tuple
 
-        # ASLR-related stuff
-        if aslr is None:
-            if self.is_cgc:
-                # cgc has no ASLR, but we don't assume a stackbase
-                self.aslr = False
-            else:
-                # We assume Linux is going to enforce stack-based ASLR
-                self.aslr = True
-        else:
-            self.aslr = aslr
-
         self.angr_project_bow = None
         self.project = None
         self.binary = None
@@ -112,6 +101,17 @@ class Crash:
 
         # Initialize
         self._initialize(angrop_object, rop_cache_path, checkpoint_path)
+
+        # ASLR-related stuff
+        if aslr is None:
+            if self.is_cgc:
+                # cgc has no ASLR, but we don't assume a stackbase
+                self.aslr = False
+            else:
+                # We assume Linux is going to enforce stack-based ASLR
+                self.aslr = True
+        else:
+            self.aslr = aslr
 
         # Work
         self._work(pov_file, format_infos)
@@ -433,6 +433,14 @@ class Crash:
             return False
         else:
             raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
+
+    @property
+    def is_linux(self):
+        """
+        Are we working on a Linux binary?
+        """
+
+        return self.project.loader.main_object.os.startswith('UNIX')
 
     def one_of(self, crash_types):
         """
