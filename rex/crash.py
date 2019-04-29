@@ -37,7 +37,7 @@ class Crash:
                  hooks=None, format_infos=None, tracer_bow=None,
                  explore_steps=0,
                  input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
-                 checkpoint_path=None,
+                 checkpoint_path=None, crash_state=None, prev_state=None,
                  #
                  # angrop-related settings
                  #
@@ -59,6 +59,8 @@ class Crash:
                                     only set by exploration methods.
         :param checkpoint_path:     Path to a checkpoint file that provides initial_state, prev_state, crash_state, and
                                     so on.
+        :param crash_state:         An already traced crash state.
+        :param prev_state:          The predecessor of the final crash state.
 
         angrop-related settings:
         :param rop_cache_tuple:     A angrop tuple to load from.
@@ -100,7 +102,7 @@ class Crash:
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
 
         # Initialize
-        self._initialize(angrop_object, rop_cache_path, checkpoint_path)
+        self._initialize(angrop_object, rop_cache_path, checkpoint_path, crash_state, prev_state)
 
         # ASLR-related stuff
         if aslr is None:
@@ -456,7 +458,7 @@ class Crash:
     # Private methods
     #
 
-    def _initialize(self, rop_obj, rop_cache_path, checkpoint_path):
+    def _initialize(self, rop_obj, rop_cache_path, checkpoint_path, crash_state, prev_state):
         """
         Initialization steps.
         - Create a new angr project.
@@ -497,7 +499,10 @@ class Crash:
 
         # Load cached/intermediate states
         self.core_registers = None
-        if checkpoint_path is not None:
+        if crash_state is not None and prev_state is not None:
+            self.state = crash_state
+            self.prev = prev_state
+        elif checkpoint_path is not None:
             l.info("Loading checkpoint file at %#s.", checkpoint_path)
             self.checkpoint_restore(checkpoint_path)
             self._traced = True
