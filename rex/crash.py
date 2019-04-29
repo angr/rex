@@ -16,7 +16,6 @@ from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from .vulnerability import Vulnerability
-from .network_feeder import NetworkFeeder
 from .enums import CrashInputType
 from .preconstrained_file_stream import SimPreconstrainedFileStream
 
@@ -43,10 +42,7 @@ class Crash:
                  # angrop-related settings
                  #
                  rop_cache_tuple=None, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None,
-                 #
-                 # the following are deprecated. use checkpoint_path instead.
-                 #
-                 prev_path=None, crash_state=None, initial_state=None):
+                 ):
         """
         :param target:              archr Target that contains the binary that crashed.
         :param crash:               String of input which crashed the binary.
@@ -67,64 +63,29 @@ class Crash:
         angrop-related settings:
         :param rop_cache_tuple:     A angrop tuple to load from.
         :param use_rop:             Whether or not to use rop.
-        :param angrop_object:       An angrop object, should only be set by
-                                    exploration methods.
-
-        The following parameters are deprecated. Use checkpoint_path instead.
-        :param initial_state:       The initial state of exploitation.
-        :param crash_state:         An already traced crash state.
-        :param prev_path:           Path leading up to the crashing block.
+        :param angrop_object:       An angrop object, should only be set by exploration methods.
         """
 
         self.target = target # type: archr.targets.Target
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.hooks = {} if hooks is None else hooks
-        self.explore_steps = explore_steps
         self.use_crash_input = use_crash_input
         self.input_type = input_type
         self.target_port = port
         self.crash = crash
         self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
 
+        self.explore_steps = explore_steps
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
-        # Initialize an angr Project
-        dsb = archr.arsenal.DataScoutBow(self.target)
-        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
-        self.project = self.angr_project_bow.fire()
-        self.binary = self.target.resolve_local_path(self.target.target_path)
-
-        # Add custom hooks
-        for addr, proc in self.hooks.items():
-            self.project.hook(addr, proc)
-            l.debug("Hooking %#x -> %s...", addr, proc.display_name)
-
-        # ROP-related stuff
-        if use_rop:
-            if angrop_object is not None:
-                self.rop = angrop_object
-            else:
-                if not rop_cache_path:
-                    # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
-                    # hash binary contents for rop cache name
-                    binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
-                    rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
-                self.rop = self._initialize_rop(fast_mode=fast_mode, rop_cache_tuple=rop_cache_tuple,
-                                                 rop_cache_path=rop_cache_path)
-        else:
-            self.rop = None
-
-        if self.project.loader.main_object.os == 'cgc':
-            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
-
-        self.os = self.project.loader.main_object.os
-        if self.os.startswith('UNIX'):
-            self.os = 'unix'
+        self._use_rop = use_rop
+        self._rop_fast_mode = fast_mode
+        self._rop_cache_tuple = rop_cache_tuple
 
         # ASLR-related stuff
         if aslr is None:
-            if self.os == "cgc":
+            if self.is_cgc:
                 # cgc has no ASLR, but we don't assume a stackbase
                 self.aslr = False
             else:
@@ -133,44 +94,27 @@ class Crash:
         else:
             self.aslr = aslr
 
-        # Load cached/intermediate states
-        self.core_registers = None
-        if crash_state is not None or prev_path is not None or initial_state is not None:
-            l.warning("'crash_state', 'prev_path' and 'initial_state' are deprecated. Please use 'checkpoint' instead.")
-            self.state = crash_state
-            self.prev = prev_path
-            self.initial_state = initial_state
-            traced = True
-        elif checkpoint_path is not None:
-            l.info("Loading checkpoint file at %#s.", checkpoint_path)
-            self.checkpoint_restore(checkpoint_path)
-            traced = True
-        else:
-            self.state = None
-            self.prev = None
-            self.initial_state = None
-            traced = False
-
-        self._t = None  # The angr.exploration_techniques.Tracer object. Will be created during self._trace()
-        if not traced:
-            # Begin tracing!
-            self._preconstraining_input_data = None
-            self._has_preconstrained = False
-            self._trace(pov_file=pov_file,
-                        format_infos=format_infos,
-                        )
-
+        self.angr_project_bow = None
+        self.project = None
+        self.binary = None
+        self.rop = None
+        self.initial_state = None
+        self.state = None
+        self.prev = None
+        self._t = None
+        self._traced = None
         self.added_actions = [ ]  # list of actions added during exploitation
 
-        l.info("Filtering memory writes.")
         self.symbolic_mem = None
         self.flag_mem = None
-        self._filter_memory_writes()
-
-        l.info("Triaging the crash.")
         self.crash_types = [ ]  # crash type
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
-        self._triage_crash()
+
+        # Initialize
+        self._initialize(angrop_object, rop_cache_path, checkpoint_path)
+
+        # Work
+        self._work(pov_file, format_infos)
 
     #
     # Public methods
@@ -239,7 +183,7 @@ class Crash:
 
             kwargs['shellcode_opts'] = opts
 
-        if self.os == 'cgc':
+        if self.is_cgc:
             exploit = CGCExploitFactory(self, **kwargs)
         else:
             exploit = ExploitFactory(self, **kwargs)
@@ -291,7 +235,7 @@ class Crash:
 
     def point_to_flag(self):
         """
-        Create a testcase which points an arbitrary-read crash at the flag page.
+        [CGC only] Create a test case which points an arbitrary-read crash at the flag page.
         """
         if not self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT]):
             raise CannotExploit("only arbitrary-reads can be exploited this way")
@@ -314,7 +258,7 @@ class Crash:
                 self._reconstrain_flag_data(cp)
                 yield ChallRespInfo.atoi_dumps(cp)
             except CannotExploit:
-                l.warning("crash couldn't be pointed at flag skipping")
+                l.warning("Crash couldn't be pointed at flag. Skipping.")
 
         # look for contiguous flag bytes of length 4 or longer and try to leak only one
         max_tries = 20
@@ -410,7 +354,6 @@ class Crash:
         cp.crash = self.crash
         cp.input_type = self.input_type
         cp.project = self.project
-        cp.os = self.os
         cp.aslr = self.aslr
         cp.prev = self.prev.copy()
         cp.state = self.state.copy()
@@ -505,39 +448,111 @@ class Crash:
     # Private methods
     #
 
+    def _initialize(self, rop_obj, rop_cache_path, checkpoint_path):
+        """
+        Initialization steps.
+        - Create a new angr project.
+        - Load or collect ROP gadgets.
+        - Restore states from a previous checkpoint if available.
+
+        :return:    None
+        """
+
+        # Initialize an angr Project
+        dsb = archr.arsenal.DataScoutBow(self.target)
+        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
+        self.project = self.angr_project_bow.fire()
+        self.binary = self.target.resolve_local_path(self.target.target_path)
+
+        # Add custom hooks
+        for addr, proc in self.hooks.items():
+            self.project.hook(addr, proc)
+            l.debug("Hooking %#x -> %s...", addr, proc.display_name)
+
+        # ROP-related stuff
+        if self._use_rop:
+            if rop_obj is not None:
+                self.rop = rop_obj
+            else:
+                if not rop_cache_path:
+                    # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
+                    # hash binary contents for rop cache name
+                    binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
+                    rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
+                self.rop = self._initialize_rop(fast_mode=self._rop_fast_mode, rop_cache_tuple=self._rop_cache_tuple,
+                                                rop_cache_path=rop_cache_path)
+        else:
+            self.rop = None
+
+        if self.project.loader.main_object.os == 'cgc':
+            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
+
+        # Load cached/intermediate states
+        self.core_registers = None
+        if checkpoint_path is not None:
+            l.info("Loading checkpoint file at %#s.", checkpoint_path)
+            self.checkpoint_restore(checkpoint_path)
+            self._traced = True
+        else:
+            self.state = None
+            self.prev = None
+            self.initial_state = None
+            self._traced = False
+
+    def _work(self, pov_file, format_infos):
+        """
+        Perform tracing, memory write filtering, and crash triaging.
+
+        :return:    None
+        """
+
+        if not self._traced:
+            # Begin tracing!
+            self._preconstraining_input_data = None
+            self._has_preconstrained = False
+            self._trace(pov_file=pov_file,
+                        format_infos=format_infos,
+                        )
+
+        l.info("Filtering memory writes.")
+        self._filter_memory_writes()
+
+        l.info("Triaging the crash.")
+        self._triage_crash()
+
     def _trace(self, pov_file=None, format_infos=None):
+        """
+        Symbolically trace the target program with the given input. A NonCrashingInput exception will be raised if the
+        target program does not crash with the given input.
+
+        :param pov_file:        CGC-specific setting.
+        :param format_infos:    CGC-specific setting.
+        :return:                None.
+        """
+
+        # sanity check
+        if pov_file is None and self.crash is None:
+            raise ValueError("Must specify either crash or pov_file.")
+        if pov_file is not None and self.crash is not None:
+            raise ValueError("Cannot specify both a pov_file and a crash.")
 
         # faster place to check for non-crashing inputs
-
-        # optimized crash check
-        if self.os == 'cgc':
-            r = self.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash)
-            if not r.crashed:
-                if not self.tracer_bow.fire(save_core=True, testcase=self.crash, report_bad_args=True).crashed:
-                    l.warning("input did not cause a crash")
-                    raise NonCrashingInput
-            cgc_flag_page_magic = r.magic_contents
+        if self.is_cgc:
+            cgc_flag_page_magic = self._cgc_get_flag_page_magic()
         else:
             cgc_flag_page_magic = None
 
-        if pov_file is None and self.crash is None:
-            raise ValueError("must specify crash or pov_file")
-
-        if pov_file is not None and self.crash is not None:
-            raise ValueError("cannot specify both a pov_file and an crash")
-
-        #
-        # Prepare the state and trace
-        #
+        # Prepare the initial state
 
         if pov_file is not None:
             input_data = TracerPoV(pov_file)
         else:
             input_data = self.crash
 
+        # collect a concrete trace
         r = self.tracer_bow.fire(testcase=input_data, save_core=True)
 
-        # If a coredump is available, save a copy of all registers in the coredump for future references
+        # if a coredump is available, save a copy of all registers in the coredump for future references
         if os.path.isfile(r.core_path):
             tiny_core = TinyCore(r.core_path)
             self.core_registers = tiny_core.registers
@@ -555,17 +570,17 @@ class Crash:
             save_unconstrained=r.crashed
         )
 
+        # trace symbolically!
         self._t = r.tracer_technique(keep_predecessors=2)
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
-
         if self.is_cgc:
             s = simgr.one_active
             ChallRespInfo.prep_tracer(s, format_infos)
             ZenPlugin.prep_tracer(s)
-
         simgr.run()
 
+        # tracing completed
         # if there was no crash we'll have to use the previous path's state
         if 'crashed' in simgr.stashes:
             # the state at crash time
@@ -578,10 +593,9 @@ class Crash:
 
         zp = self.state.get_plugin('zen_plugin') if self.is_cgc else None
         if 'crashed' not in simgr.stashes and zp is not None and len(zp.controlled_transmits) == 0:
-            l.warning("input did not cause a crash")
+            l.warning("Input did not cause a crash.")
             raise NonCrashingInput
-
-        l.debug("done tracing input")
+        l.debug("Done tracing input.")
 
     def _create_initial_state(self, input_data, cgc_flag_page_magic=None):
 
@@ -646,6 +660,13 @@ class Crash:
         return initial_state
 
     def _preconstrain_file(self, fstream):
+        """
+        Use preconstrainer to preconstrain an input file to the specified input data upon the first read on the stream.
+
+        :param fstream: The file stream where the read happens.
+        :return:        None
+        """
+
         if not self._has_preconstrained:
             l.info("Preconstraining file stream %s upon the first read()." % fstream)
             self._has_preconstrained = True
@@ -653,6 +674,20 @@ class Crash:
         else:
             l.error("Preconstraining is attempted twice, but currently Rex only supports preconstraining one file. "
                     "Ignored.")
+
+    def _cgc_get_flag_page_magic(self):
+        """
+        [CGC only] Get the magic content in flag page for CGC binaries.
+
+        :return:    The magic page content.
+        """
+
+        r = self.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash)
+        if not r.crashed:
+            if not self.tracer_bow.fire(save_core=True, testcase=self.crash, report_bad_args=True).crashed:
+                l.warning("input did not cause a crash")
+                raise NonCrashingInput
+        return r.magic_contents
 
     def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a
@@ -790,12 +825,18 @@ class Crash:
         self.flag_mem = self._segment(flag_writes)
 
     def _triage_crash(self):
+        """
+        Crash triaging. Fill in crash_types.
+
+        :return:    None
+        """
+
         ip = self.state.regs.ip
         bp = self.state.regs.bp
 
         # any arbitrary receives or transmits
         # TODO: receives
-        zp = self.state.get_plugin('zen_plugin') if self.os == 'cgc' else None
+        zp = self.state.get_plugin('zen_plugin') if self.is_cgc else None
         if zp is not None and len(zp.controlled_transmits):
             l.debug("detected arbitrary transmit vulnerability")
             self.crash_types.append(Vulnerability.ARBITRARY_TRANSMIT)
@@ -863,6 +904,9 @@ class Crash:
                 break
 
     def _reconstrain_flag_data(self, state):
+        """
+        [CGC only] Constrain data in the flag page.
+        """
 
         l.info("reconstraining flag")
 
@@ -930,8 +974,9 @@ class Crash:
     @staticmethod
     def _four_flag_bytes_offset(ast):
         """
-        checks if an ast contains 4 contiguous flag bytes
+        [CGC only] checks if an ast contains 4 contiguous flag bytes
         if so returns the offset in bytes, otherwise returns None
+
         :return: the offset or None
         """
         if ast.op != "Concat":
@@ -974,6 +1019,15 @@ class Crash:
 
     @staticmethod
     def _get_state_pointing_to_flag(state, violating_addr):
+        """
+        [CGC only] Point an arbitrary-read location at the flag page.
+
+        :param state:           angr SimState instance.
+        :param violating_addr:  The address where the arbitrary-read points to.
+        :return:                The new state with the arbitrary-read constrained to an address within the flag page.
+        :rtype:                 angr.SimState
+        """
+
         cgc_magic_page_addr = 0x4347c000
 
         # see if we can point randomly inside the flag (prevent people filtering exactly 0x4347c000)
@@ -1035,7 +1089,6 @@ class Crash:
             else:
                 # update the end of the current segment, the segment `write` exists within current
                 current_w_end = max(current_w_end, write_start + write_len)
-
 
         # write in the last segment
         segments[current_w_start] = current_w_end - current_w_start
