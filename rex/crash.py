@@ -1115,3 +1115,15 @@ class Crash:
         segments[current_w_start] = current_w_end - current_w_start
 
         return segments
+
+    @staticmethod
+    def input_type_to_channel_type(input_type):
+        if input_type == CrashInputType.TCP:
+            return 'tcp'
+        elif input_type == CrashInputType.TCP6:
+            return 'tcp6'
+        elif input_type == CrashInputType.UDP:
+            return 'udp'
+        elif input_type == CrashInputType.UDP6:
+            return 'udp6'
+        raise NotImplementedError("Unsupported input type %s." % input_type)
