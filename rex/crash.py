@@ -171,9 +171,9 @@ class Crash:
             opts = kwargs.get('shellcode_opts', {})
             # are there open sockets that can receive our input?
             try:
-                open_fds = {'fd': next(fd for fd in self.state.posix.fd if
+                open_fds = {'fd': [fd for fd in self.state.posix.fd if
                             self.state.posix.fd[fd].read_storage.ident.startswith('aeg_stdin') and
-                            self.state.solver.eval(self.state.posix.fd[fd].read_storage.pos) > 0)
+                            self.state.solver.eval(self.state.posix.fd[fd].read_storage.pos) > 0]
                 }
             except StopIteration:
                 open_fds = { }
