@@ -166,7 +166,7 @@ class Crash:
             else:
                 kwargs["blacklist_techniques"] = {"explore_for_exploit"}
 
-        our_open_fd = None
+        our_open_fd = kwargs.get('our_open_fd', None)
         if self.input_type == CrashInputType.TCP:
             opts = kwargs.get('shellcode_opts', {})
             # are there open sockets that can receive our input?
