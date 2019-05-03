@@ -572,7 +572,7 @@ class Crash:
 
         # collect a concrete trace
         save_core = False
-        r = self.tracer_bow.fire(testcase=test_case, save_core=save_core)
+        r = self.tracer_bow.fire(testcase=input_data, save_core=save_core)
 
         if save_core:
             # if a coredump is available, save a copy of all registers in the coredump for future references
