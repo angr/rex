@@ -571,15 +571,17 @@ class Crash:
             input_data = self.crash
 
         # collect a concrete trace
-        r = self.tracer_bow.fire(testcase=input_data, save_core=True)
+        save_core = False
+        r = self.tracer_bow.fire(testcase=test_case, save_core=save_core)
 
-        # if a coredump is available, save a copy of all registers in the coredump for future references
-        if os.path.isfile(r.core_path):
-            tiny_core = TinyCore(r.core_path)
-            self.core_registers = tiny_core.registers
-        else:
-            l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
-                    r.local_core_path)
+        if save_core:
+            # if a coredump is available, save a copy of all registers in the coredump for future references
+            if r.core_path and os.path.isfile(r.core_path):
+                tiny_core = TinyCore(r.core_path)
+                self.core_registers = tiny_core.registers
+            else:
+                l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
+                        r.core_path)
 
         if self.initial_state is None:
             self.initial_state = self._create_initial_state(input_data, cgc_flag_page_magic=cgc_flag_page_magic)
