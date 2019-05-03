@@ -341,20 +341,47 @@ class Crash:
             if addr > sp_base:
                 continue
 
-            else:
-                if below_sp:
-                    # if the region is below sp it gets added
-                    if addr > sp:
-                        control[addr] = self.symbolic_mem[addr]
-
-                    # if sp falls into the region it gets added starting at sp
-                    elif addr + self.symbolic_mem[addr] > sp:
-                        control[sp] = addr + self.symbolic_mem[addr] - sp
-
-                else:
+            if below_sp:
+                # if the region is below sp it gets added
+                if addr > sp:
                     control[addr] = self.symbolic_mem[addr]
 
-        return control
+                # if sp falls into the region it gets added starting at sp
+                elif addr + self.symbolic_mem[addr] > sp:
+                    control[sp] = addr + self.symbolic_mem[addr] - sp
+
+            else:
+                control[addr] = self.symbolic_mem[addr]
+
+        STACK_ARGS_THRESHOLD = 5
+        MIN_FREEDOM = 2
+
+        # additional heuristic check: if the address is too close to sp, it might be a stack variable used
+        # by the last called function. it might be already constrained to some fixed value.
+        filtered_control = { }
+        for addr, size in control.items():
+            if addr <= sp < addr + size:
+                gap_start, gap_end = None, None
+                # test up to STACK_ARGS_THRESHOLD words above sp
+                arch = self.state.arch
+                for i in range(STACK_ARGS_THRESHOLD):
+                    v = self.state.memory.load(sp + i * arch.bytes, arch.bytes, endness=arch.memory_endness)
+                    if len(self.state.solver.eval_upto(v, MIN_FREEDOM)) < MIN_FREEDOM:
+                        # oops
+                        if gap_start is None:
+                            gap_start = sp + i * arch.bytes
+                        gap_end = sp + (i + 1) * arch.bytes
+
+                if gap_start is not None and gap_end is not None:
+                    l.warning("Gap around stack poiner is detected. Refining controlled regions.")
+                    # break the controlled region
+                    filtered_control[addr] = gap_start - addr
+                    filtered_control[gap_end] = addr + size - gap_end
+                    continue
+
+            filtered_control[addr] = size
+
+        return filtered_control
 
     def copy(self):
         cp = Crash.__new__(Crash)
