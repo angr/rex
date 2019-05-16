@@ -11,6 +11,7 @@ from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
 from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
+from angr.exploration_techniques.tracer import TracingMode
 import archr
 from tracer import TracerPoV, TinyCore
 
@@ -621,7 +622,7 @@ class Crash:
         )
 
         # trace symbolically!
-        self._t = r.tracer_technique(keep_predecessors=2)
+        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict)
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
         if self.is_cgc:
