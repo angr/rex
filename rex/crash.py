@@ -594,13 +594,19 @@ class Crash:
         # Prepare the initial state
 
         if pov_file is not None:
-            input_data = TracerPoV(pov_file)
+            test_case = TracerPoV(pov_file)
         else:
             input_data = self.crash
+            channel = self.input_type_to_channel_type(self.input_type)
+            if channel != "stdio":
+                channel += ":0"
+            test_case = archr.arrowheads.ArrowheadLog(
+                ([2.0, channel, input_data],)
+            )
 
         # collect a concrete trace
         save_core = False
-        r = self.tracer_bow.fire(testcase=input_data, save_core=save_core)
+        r = self.tracer_bow.fire(testcase=test_case, save_core=save_core)
 
         if save_core:
             # if a coredump is available, save a copy of all registers in the coredump for future references
@@ -1148,7 +1154,9 @@ class Crash:
 
     @staticmethod
     def input_type_to_channel_type(input_type):
-        if input_type == CrashInputType.TCP:
+        if input_type == CrashInputType.STDIN:
+            return "stdio"
+        elif input_type == CrashInputType.TCP:
             return 'tcp'
         elif input_type == CrashInputType.TCP6:
             return 'tcp6'
