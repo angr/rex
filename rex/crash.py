@@ -22,7 +22,7 @@ from .preconstrained_file_stream import SimPreconstrainedFileStream
 
 
 l = logging.getLogger("rex.Crash")
-l.setLevel(logging.INFO)
+l.setLevel(logging.DEBUG)
 
 
 class NonCrashingInput(Exception):
@@ -417,14 +417,14 @@ class Crash:
         :param str path:    Path to the file which saves intermediate states.
         :return:            None
         """
-
+        if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
+            return
         s = {
             'initial_state': self.initial_state,
             'crash_state': self.state,
             'prev_state': self.prev,
             'core_registers': self.core_registers,
         }
-
         with open(path, "wb") as f:
             pickle.dump(s, f)
 
@@ -435,6 +435,8 @@ class Crash:
         :param str path:    Path to the file which saves intermediate states.
         :return:            None
         """
+        if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
+            return
 
         with open(path, "rb") as f:
             try:
@@ -605,7 +607,9 @@ class Crash:
             )
 
         # collect a concrete trace
-        save_core = False
+        save_core = True
+        if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
+            save_core = False
         r = self.tracer_bow.fire(testcase=test_case, save_core=save_core)
 
         if save_core:
