@@ -540,6 +540,7 @@ class Crash:
         if crash_state is not None and prev_state is not None:
             self.state = crash_state
             self.prev = prev_state
+            self._traced = True
         elif checkpoint_path is not None:
             l.info("Loading checkpoint file at %#s.", checkpoint_path)
             self.checkpoint_restore(checkpoint_path)
