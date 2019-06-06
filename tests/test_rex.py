@@ -235,9 +235,13 @@ def test_linux_network_stacksmash_64():
     lib_path = os.path.join(bin_location, "tests/x86_64")
     ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
     path = os.path.join(lib_path, "network_overflow")
-    port = str(random.randint(8000, 9000))
-    with archr.targets.LocalTarget([path, port], path, target_arch='x86_64').build().start() as target:
-        crash = rex.Crash(target, inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False, input_type=rex.enums.CrashInputType.TCP, port=int(port))
+    port = random.randint(8000, 9000)
+    with archr.targets.LocalTarget([path, str(port)], path,
+                                   target_arch='x86_64',
+                                   ipv4_address="127.0.0.1",
+                                   tcp_ports=(port,)).build().start() as target:
+        crash = rex.Crash(target, inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
+                          input_type=rex.enums.CrashInputType.TCP, port=port)
 
         exploit = crash.exploit()
         crash.project.loader.close()
@@ -248,8 +252,12 @@ def test_linux_network_stacksmash_64():
 
         # let's actually run the exploit
 
-    new_port = str(random.randint(9001, 10000))
-    with archr.targets.LocalTarget([path, new_port], path, target_arch='x86_64').build().start() as new_target:
+    new_port = random.randint(9001, 10000)
+    with archr.targets.LocalTarget([path, str(new_port)],
+                                   path,
+                                   target_arch='x86_64',
+                                   ipv4_address="127.0.0.1",
+                                   tcp_ports=(new_port,)).build().start() as new_target:
         try:
             p = new_target.run_command("")
 
@@ -262,7 +270,10 @@ def test_linux_network_stacksmash_64():
             
             exploit.arsenal['call_shellcode'].script(exploit_location)
 
-            exploit_result = subprocess.check_output(["python", exploit_location, "127.0.0.1", new_port, "echo hello"])
+            exploit_result = subprocess.check_output(["python", exploit_location,
+                                                      "127.0.0.1", str(new_port),
+                                                      "-c", "echo hello"
+                                                      ])
             assert b"hello" in exploit_result
         finally:
             os.unlink(exploit_location)
