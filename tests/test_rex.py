@@ -13,6 +13,7 @@ import rex
 import colorguard
 from rex.vulnerability import Vulnerability
 from angr.state_plugins.trace_additions import FormatInfoStrToInt, FormatInfoDontConstrain
+from rex.exploit.cgc.type1.cgc_type1_shellcode_exploit import CGCType1ShellcodeExploit
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
@@ -114,8 +115,8 @@ def test_shellcode_placement():
     with archr.targets.LocalTarget([path], target_os='cgc').build().start() as target:
         crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'shellcode_tester'))
 
-        arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
-        exploit = arsenal.register_setters[0]
+        arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register', 'circumstantially_set_register'})
+        exploit = [e for e in arsenal.register_setters if type(e) is CGCType1ShellcodeExploit][0]
 
         # make sure the shellcode was placed into the executable heap page
         heap_top = crash.state.solver.eval(crash.state.cgc.allocation_base)
