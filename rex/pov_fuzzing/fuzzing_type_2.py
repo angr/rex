@@ -20,10 +20,6 @@ from ..crash import CannotExploit
 from . import fuzzing_type_2_c_template
 
 l = logging.getLogger("rex.fuzzing_type_1")
-logging.getLogger("cle.elfcore").setLevel("CRITICAL")
-logging.getLogger("tracer.qemu_runner").setLevel("DEBUG")
-l.setLevel("DEBUG")
-
 
 CGC_GENERAL_REGS = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
 _PREFILTER_BYTES = {"0", "1", "A", "B", "\xff", "\x00"}

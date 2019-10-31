@@ -12,10 +12,6 @@ import compilerex
 from . import fuzzing_type_1_c_template
 
 l = logging.getLogger("rex.fuzzing_type_1")
-logging.getLogger("tracer.qemu_runner").setLevel("WARNING")
-logging.getLogger("cle.elfcore").setLevel("CRITICAL")
-l.setLevel("DEBUG")
-
 
 NUM_CGC_BITS = 20
 CGC_GENERAL_REGS = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]

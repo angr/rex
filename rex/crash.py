@@ -22,7 +22,6 @@ from .preconstrained_file_stream import SimPreconstrainedFileStream
 
 
 l = logging.getLogger("rex.Crash")
-l.setLevel(logging.DEBUG)
 
 
 class NonCrashingInput(Exception):
