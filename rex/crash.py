@@ -597,20 +597,19 @@ class Crash:
 
         if pov_file is not None:
             test_case = TracerPoV(pov_file)
+            channel = None
         else:
             input_data = self.crash
             channel = self.input_type_to_channel_type(self.input_type)
             if channel != "stdio":
                 channel += ":0"
-            test_case = archr.arrowheads.ArrowheadLog(
-                ([2.0, channel, input_data],)
-            )
+            test_case = input_data
 
         # collect a concrete trace
         save_core = True
         if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
             save_core = False
-        r = self.tracer_bow.fire(testcase=test_case, save_core=save_core)
+        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core)
 
         if save_core:
             # if a coredump is available, save a copy of all registers in the coredump for future references
