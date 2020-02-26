@@ -412,13 +412,13 @@ def test_reconstraining():
         # test point to flag #1
         cg = colorguard.ColorGuard(path, ptfi[0])
         x = cg.attempt_exploit()
-        nose.tools.assert_not_equals(x, None)
+        nose.tools.assert_not_equal(x, None)
         nose.tools.assert_true(_do_pov_test(x))
 
         # test point to flag #2
         cg = colorguard.ColorGuard(path, ptfi[1])
         x = cg.attempt_exploit()
-        nose.tools.assert_not_equals(x, None)
+        nose.tools.assert_not_equal(x, None)
         nose.tools.assert_true(_do_pov_test(x))
         crash.project.loader.close()
 
