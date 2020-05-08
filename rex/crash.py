@@ -16,7 +16,7 @@ import archr
 from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
-from .vulnerability import Vulnerability
+from .vulnerability import Vulnerability, check_fsb
 from .enums import CrashInputType
 from .preconstrained_file_stream import SimPreconstrainedFileStream
 
@@ -631,7 +631,7 @@ class Crash:
         )
 
         # trace symbolically!
-        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict)
+        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.CatchDesync)
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
         if self.is_cgc:
@@ -642,11 +642,16 @@ class Crash:
 
         # tracing completed
         # if there was no crash we'll have to use the previous path's state
-        if 'crashed' in simgr.stashes:
+        if 'crashed' in simgr.stashes and simgr.crashed:
             # the state at crash time
             self.state = simgr.crashed[0]
             # a path leading up to the crashing basic block
             self.prev = self._t.predecessors[-1]
+        elif 'desync' in simgr.stashes and simgr.desync:
+            self.state = simgr.desync[0]
+            self.prev = None
+            l.debug("Done tracing input.")
+            return
         else:
             self.state = simgr.traced[0]
             self.prev = self.state
@@ -893,6 +898,11 @@ class Crash:
 
         ip = self.state.regs.ip
         bp = self.state.regs.bp
+
+        if self.project.is_hooked(self.state.addr):
+            if check_fsb(self.state):
+                l.debug("detected format string bug vulnerability")
+                self.crash_types.append(Vulnerability.FORMAT_STRING_BUG)
 
         # any arbitrary receives or transmits
         # TODO: receives
