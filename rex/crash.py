@@ -386,20 +386,20 @@ class Crash:
         cp.input_type = self.input_type
         cp.project = self.project
         cp.aslr = self.aslr
-        cp.prev = self.prev.copy()
-        cp.state = self.state.copy()
+        cp.prev = self.prev.copy() if self.prev else None
+        cp.state = self.state.copy() if self.state else None
         cp.initial_state = self.initial_state
         cp.rop = self.rop
         cp.added_actions = list(self.added_actions)
-        cp.symbolic_mem = self.symbolic_mem.copy()
-        cp.flag_mem = self.flag_mem.copy()
+        cp.symbolic_mem = self.symbolic_mem.copy() if self.symbolic_mem else None
+        cp.flag_mem = self.flag_mem.copy() if self.flag_mem else None
         cp.crash_types = self.crash_types
         cp._t = self._t
         cp.violating_action = self.violating_action
         cp.use_crash_input = self.use_crash_input
         cp.explore_steps = self.explore_steps
         cp.constrained_addrs = list(self.constrained_addrs)
-        cp.core_registers = self.core_registers.copy() if self.core_registers is not None else None
+        cp.core_registers = self.core_registers.copy() if self.core_registers else None
 
         return cp
 
