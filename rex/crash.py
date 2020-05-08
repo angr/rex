@@ -16,7 +16,7 @@ import archr
 from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
-from .vulnerability import Vulnerability, check_fsb, Exploitables
+from .vulnerability import Vulnerability, check_fsb, Exploitables, Explorables
 from .enums import CrashInputType
 from .preconstrained_file_stream import SimPreconstrainedFileStream
 
@@ -138,10 +138,7 @@ class Crash:
         :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
         """
 
-        # TODO add arbitrary receive into this list
-        explorables = [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
-
-        return self.one_of(explorables)
+        return self.one_of(Explorables)
 
     def leakable(self):
         """
