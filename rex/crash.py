@@ -16,7 +16,7 @@ import archr
 from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
-from .vulnerability import Vulnerability, check_fsb
+from .vulnerability import Vulnerability, check_fsb, Exploitables
 from .enums import CrashInputType
 from .preconstrained_file_stream import SimPreconstrainedFileStream
 
@@ -129,10 +129,7 @@ class Crash:
         :return: True if the crash's type is generally considered exploitable, False otherwise
         """
 
-        exploitables = [Vulnerability.IP_OVERWRITE, Vulnerability.PARTIAL_IP_OVERWRITE, Vulnerability.BP_OVERWRITE,
-                Vulnerability.PARTIAL_BP_OVERWRITE, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
-
-        return self.one_of(exploitables)
+        return self.one_of(Exploitables)
 
     def explorable(self):
         """
@@ -440,7 +437,7 @@ class Crash:
         with open(path, "rb") as f:
             try:
                 s = pickle.load(f)
-            except EOFError as ex:
+            except EOFError:
                 raise EOFError("Fail to restore from checkpoint %s", path)
 
         keys = {'initial_state',
@@ -899,6 +896,7 @@ class Crash:
         ip = self.state.regs.ip
         bp = self.state.regs.bp
 
+        # check whether there is a format string bug
         if self.project.is_hooked(self.state.addr):
             if check_fsb(self.state):
                 l.debug("detected format string bug vulnerability")
@@ -940,11 +938,8 @@ class Crash:
         symbolic_actions = [ ]
         if self._t is not None and self._t.last_state is not None:
             recent_actions = reversed(self._t.last_state.history.recent_actions)
-            state = self._t.last_state
-            # TODO: this is a dead assignment! what was this supposed to be?
         else:
             recent_actions = reversed(self.state.history.actions)
-            state = self.state
         for a in recent_actions:
             if a.type == 'mem':
                 if self.state.solver.symbolic(a.addr.ast):
