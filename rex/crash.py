@@ -610,6 +610,9 @@ class Crash:
             if r.core_path and os.path.isfile(r.core_path):
                 tiny_core = TinyCore(r.core_path)
                 self.core_registers = tiny_core.registers
+
+                # when we are done with the core file, we need to remove it
+                os.unlink(r.core_path)
             else:
                 l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
                         r.core_path)
