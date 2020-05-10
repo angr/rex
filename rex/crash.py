@@ -68,27 +68,34 @@ class Crash:
         :param angrop_object:       An angrop object, should only be set by exploration methods.
         """
 
+        # rex internal data
+        self.crash = crash
+        self.crash_types = [ ]  # crash type
+
+        # rex configuration, something won't change during the life cycle
+        self.input_type = input_type
+        self.use_crash_input = use_crash_input
         self.target = target # type: archr.targets.Target
+
+        # ROP related attributes
+        self._use_rop = use_rop
+        self._rop_fast_mode = fast_mode
+        self._rop_cache_tuple = rop_cache_tuple
+        self.rop = None
+
+        # unclassified attributes
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.hooks = {} if hooks is None else hooks
-        self.use_crash_input = use_crash_input
-        self.input_type = input_type
         self.target_port = port
-        self.crash = crash
         self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
 
         self.explore_steps = explore_steps
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
-        self._use_rop = use_rop
-        self._rop_fast_mode = fast_mode
-        self._rop_cache_tuple = rop_cache_tuple
-
         self.angr_project_bow = None
         self.project = None
         self.binary = None
-        self.rop = None
         self.initial_state = None
         self.state = None
         self.prev = None
@@ -98,7 +105,6 @@ class Crash:
 
         self.symbolic_mem = None
         self.flag_mem = None
-        self.crash_types = [ ]  # crash type
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
 
         # Initialize
@@ -504,6 +510,8 @@ class Crash:
         self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
         self.project = self.angr_project_bow.fire()
         self.binary = self.target.resolve_local_path(self.target.target_path)
+        if self.project.loader.main_object.os == 'cgc':
+            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
         # Add custom hooks
         for addr, proc in self.hooks.items():
@@ -524,9 +532,6 @@ class Crash:
                                                 rop_cache_path=rop_cache_path)
         else:
             self.rop = None
-
-        if self.project.loader.main_object.os == 'cgc':
-            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
         # Load cached/intermediate states
         self.core_registers = None
