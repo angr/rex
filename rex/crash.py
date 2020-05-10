@@ -16,7 +16,7 @@ import archr
 from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
-from .vulnerability import Vulnerability, check_fsb, Exploitables, Explorables
+from .vulnerability import Vulnerability, check_fsb, Exploitables, Explorables, Leakables
 from .enums import CrashInputType
 from .preconstrained_file_stream import SimPreconstrainedFileStream
 
@@ -147,7 +147,7 @@ class Crash:
         :return: True if the 'point-to-flag' technique can be applied to this crash
         """
 
-        return self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT])
+        return self.one_of(Leakables)
 
     def _prepare_exploit_factory(self, blacklist_symbolic_explore=True, **kwargs):
         # crash should have been classified at this point
