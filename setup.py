@@ -17,8 +17,12 @@ setup(
         'angr',
         'archr',
         'angrop',
+        'jinja2',
         'tracer @ git://github.com/angr/tracer',
         'povsim @ git://github.com/mechaphish/povsim',
         'compilerex @ git://github.com/mechaphish/compilerex',
     ],
+    package_data={
+        'rex': ['rex/scripter/templates/*']
+    },
 )
