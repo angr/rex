@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+
+import sys
+import socket
+import argparse
+
+import nclib
+
+
+{% set newline = joiner('\n') -%}
+{% for name, value in constants.items() %}
+{%- set value = value.value -%}
+{%- if value is not none -%}
+{{- newline() -}}
+{{ name }} = {{ value }}
+{% endif -%}
+{% endfor %}
+
+
+def connect_target():
+    return nclib.Netcat((host, port))
+
+
+def send_all(sock, data, _=None):
+    sent = 0
+    while sent < len(data):
+        sent += sock.send(data)
+    return sent
+
+
+def recv_all(sock, _=None):
+    result = b''
+    while True:
+        one_result = sock.recv(sock, 4096)
+        if len(one_result) == 0:
+           break
+        result += one_result
+    return result
+
+
+def finish(sock):
+    sock.shutdown(socket.SHUT_WR)
+
+    result = recv_all(sock)
+    sock.close()
+
+    print(result)
+
+
+def RETURN(*args):
+    return args
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Launch exploit.")
+    parser.add_argument('host')
+    parser.add_argument('port')
+    args = parser.parse_args()
+
+    global host, port
+    host = args.host
+    port = int(args.port)
+
+{% set newline = joiner('\n') -%}
+{% for action in actions %}
+{{- newline() -}}
+{{ '    ' }}
+{%- if action.function_result.name -%}
+    {{ action.function_result.name }} ={{ ' ' }}
+{%- endif -%}
+    {{ action.function }}(
+{%- set separator = joiner(', ') -%}
+{%- for arg in action.args -%}
+    {{- separator() -}}
+    {{ arg }}
+{%- endfor -%}
+    )
+{% endfor %}
+
+
+if __name __ == '__main__':
+    main()

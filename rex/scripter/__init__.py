@@ -60,7 +60,7 @@ class ScripterAction:
                 arg = arg.encode('latin')
             if type(arg) is ScripterVariableProxy:
                 if arg.name is None:
-                    raise ValueError(f"Cannot reference unbound variable")
+                    raise ValueError("Cannot reference unbound variable")
                 self.args.append(arg)
             elif type(arg) in [bytes, int, float]:
                 self.args.append(arg)
@@ -88,7 +88,8 @@ class Scripter:
 
     def __setattr__(self, name, value):
         if name in self.__slots__:
-            return super().__setattr__(name, value)
+            super().__setattr__(name, value)
+            return
 
         if name in self.constants or name in self.variables:
             raise ValueError(f"Name `{name}` already used")

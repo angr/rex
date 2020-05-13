@@ -11,11 +11,13 @@
 
 #define RETURN(X) ({return X;})
 
+{% set newline = joiner('\n') -%}
 {% for name, value in constants.items() %}
 {%- set value = value.value -%}
 {%- if value is not none -%}
+{{- newline() -}}
 #define {{ name }} {{ value | cstring if value.__class__.__name__ == 'bytes' else value }}
-{%- endif -%}
+{% endif -%}
 {% endfor %}
 
 static CommandInjectionV1* g_exp = NULL;
@@ -121,7 +123,7 @@ ssize_t send_all(int sock, const char *data, size_t size) {
     size_t sent = 0;
     while (sent < size) {
         int one_sent = send(sock, data, size-sent, 0);
-        if (onesent < 0) {
+        if (one_sent < 0) {
             return one_sent;
         }
         sent += one_sent;
@@ -183,7 +185,9 @@ ExploitResult exploit_entry(uint32_t exploit_spec_version, const void* exploit_s
         g_target_port = g_exp->override_target_port;
     }
 
+{% set newline = joiner('\n') -%}
 {% for action in actions %}
+{{- newline() -}}
 {{ '    ' }}
 {%- if action.function_result.name -%}
     {%- set type = action.function_result.type_ -%}
@@ -198,6 +202,5 @@ ExploitResult exploit_entry(uint32_t exploit_spec_version, const void* exploit_s
     {{ arg | cstring if arg.__class__.__name__ == 'bytes' else arg }}
 {%- endfor -%}
     );
-
 {% endfor -%}
 }
