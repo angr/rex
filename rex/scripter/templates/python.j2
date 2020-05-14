@@ -2,6 +2,7 @@
 
 import sys
 import socket
+import time
 import argparse
 
 import nclib
@@ -55,11 +56,20 @@ def main():
     parser = argparse.ArgumentParser(description="Launch exploit.")
     parser.add_argument('host')
     parser.add_argument('port')
+    parser.add_argument('-c', '--cmd', nargs="*")
     args = parser.parse_args()
 
     global host, port
     host = args.host
     port = int(args.port)
+
+    if args.cmd:
+        def finish(sock):
+            for c in args.cmd:
+                time.sleep(0.1)
+                sock.send_line(c.encode())
+                time.sleep(0.1)
+                print(sock.recv(timeout=4).decode('utf-8'), end="")
 
 {% set newline = joiner('\n') -%}
 {% for action in actions %}
@@ -78,5 +88,5 @@ def main():
 {% endfor %}
 
 
-if __name __ == '__main__':
+if __name__ == '__main__':
     main()
