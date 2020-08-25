@@ -4,8 +4,8 @@ from angr.storage.file import SimFileStream
 
 
 class SimPreconstrainedFileStream(SimFileStream):
-    def __init__(self, name, preconstraining_handler=None, **kwargs):
-        super().__init__(name, **kwargs)
+    def __init__(self, *args, preconstraining_handler=None, **kwargs):
+        super().__init__(*args, **kwargs)
 
         self.preconstraining_handler = preconstraining_handler
         self._attempted_preconstraining = False

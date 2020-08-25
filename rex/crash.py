@@ -867,7 +867,7 @@ class Crash:
         :return:    None
         """
 
-        memory_writes = sorted(self.state.memory.mem.get_symbolic_addrs())
+        memory_writes = sorted(self.state.memory.get_symbolic_addrs())
         if self.is_cgc:
             # remove all memory writes that directly end up in the CGC flag page (0x4347c000 - 0x4347d000)
             memory_writes = [m for m in memory_writes if m // 0x1000 != 0x4347c]
