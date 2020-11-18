@@ -631,7 +631,9 @@ class Crash:
         )
 
         # trace symbolically!
-        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict)
+        # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
+        # there are no aslr slides
+        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False)
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
         if self.is_cgc:
