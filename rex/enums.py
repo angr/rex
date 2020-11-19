@@ -1,8 +1,8 @@
 
 class CrashInputType:
-    STDIN = 0
-    POV_FILE = 1
-    TCP = 2
-    UDP = 3
-    TCP6 = 4
-    UDP6 = 5
+    STDIN = "stdin"
+    POV_FILE = "pov_file"
+    TCP = "tcp"
+    UDP = "udp"
+    TCP6 = "tcp6"
+    UDP6 = "udp6"
