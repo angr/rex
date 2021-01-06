@@ -13,8 +13,7 @@ from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
 from angr.exploration_techniques.tracer import TracingMode
 import archr
-from tracer import TracerPoV
-from cle.backends import ELFCore
+from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from .vulnerability import Vulnerability
@@ -615,8 +614,8 @@ class Crash:
         if save_core:
             # if a coredump is available, save a copy of all registers in the coredump for future references
             if r.core_path and os.path.isfile(r.core_path):
-                elfcore = ELFCore(r.core_path)
-                self.core_registers = elfcore.registers
+                tiny_core = TinyCore(r.core_path)
+                self.core_registers = tiny_core.registers
             else:
                 l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
                         r.core_path)
