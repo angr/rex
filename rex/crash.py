@@ -506,7 +506,10 @@ class Crash:
         """
 
         # Initialize an angr Project
-        dsb = archr.arsenal.DataScoutBow(self.target)
+
+        # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
+        # in the analyzer
+        dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
         self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
         self.project = self.angr_project_bow.fire()
         self.binary = self.target.resolve_local_path(self.target.target_path)
