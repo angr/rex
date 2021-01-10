@@ -38,6 +38,7 @@ class Crash:
                  explore_steps=0,
                  input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
                  checkpoint_path=None, crash_state=None, prev_state=None,
+                 trace_addr=None,
                  #
                  # angrop-related settings
                  #
@@ -61,6 +62,7 @@ class Crash:
                                     so on.
         :param crash_state:         An already traced crash state.
         :param prev_state:          The predecessor of the final crash state.
+        :param trace_addr:          Used in half-way tracing, this is the address where tracing starts
 
         angrop-related settings:
         :param rop_cache_tuple:     A angrop tuple to load from.
@@ -92,6 +94,8 @@ class Crash:
         self.initial_state = None
         self.state = None
         self.prev = None
+        self.trace_addr = trace_addr
+        self.halfway_tracing = bool(trace_addr)
         self._t = None
         self._traced = None
         self.added_actions = [ ]  # list of actions added during exploitation
@@ -507,11 +511,24 @@ class Crash:
 
         # Initialize an angr Project
 
-        # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
-        # in the analyzer
-        dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
-        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
-        self.project = self.angr_project_bow.fire()
+        if not self.halfway_tracing:
+            # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
+            # in the analyzer
+            dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
+            self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
+            self.project = self.angr_project_bow.fire()
+        else:
+            # to enable halfway-tracing, we need to generate a coredump at the wanted address first
+            # and use the core dump to create an angr project
+            if self.target.target_arch != 'x86_64':
+                raise NotImplementedError("Currently, halfway-tracing only works with x86_64 binaries")
+
+            with self.target.shellcode_context(addr=self.trace_addr, bin_code=b'\xcc'):
+                # assuming no input is processes, yet
+                r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True)
+            self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, None)
+            self.project = self.angr_project_bow.fire(core_path=r.core_path)
+
         self.binary = self.target.resolve_local_path(self.target.target_path)
 
         # Add custom hooks
