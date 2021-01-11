@@ -96,6 +96,8 @@ class Crash:
         self.prev = None
         self.trace_addr = trace_addr
         self.halfway_tracing = bool(trace_addr)
+        if self.trace_addr:
+            l.warning("trace_addr must be the start of a basic block, or tracing will fail")
         self._t = None
         self._traced = None
         self.added_actions = [ ]  # list of actions added during exploitation
@@ -511,11 +513,12 @@ class Crash:
 
         # Initialize an angr Project
 
+        # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
+        # in the analyzer
+        dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
+        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
+
         if not self.halfway_tracing:
-            # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
-            # in the analyzer
-            dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
-            self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
             self.project = self.angr_project_bow.fire()
         else:
             # to enable halfway-tracing, we need to generate a coredump at the wanted address first
@@ -526,7 +529,6 @@ class Crash:
             with self.target.shellcode_context(addr=self.trace_addr, bin_code=b'\xcc'):
                 # assuming no input is processes, yet
                 r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True)
-            self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, None)
             self.project = self.angr_project_bow.fire(core_path=r.core_path)
 
         self.binary = self.target.resolve_local_path(self.target.target_path)
@@ -629,7 +631,7 @@ class Crash:
         save_core = True
         if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
             save_core = False
-        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core)
+        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core, trace_start_addr=self.trace_addr)
 
         if save_core:
             # if a coredump is available, save a copy of all registers in the coredump for future references
@@ -653,7 +655,7 @@ class Crash:
         # trace symbolically!
         # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
         # there are no aslr slides
-        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict)
+        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
         if self.is_cgc:
