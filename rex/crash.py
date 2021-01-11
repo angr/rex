@@ -344,7 +344,7 @@ class Crash:
         sp_base = self.initial_state.solver.eval(self.initial_state.regs.sp)
         for addr in self.symbolic_mem:
             # discard our fake heap etc
-            if addr > sp_base:
+            if addr > sp_base | 0xfff:
                 continue
 
             if below_sp:
@@ -393,7 +393,9 @@ class Crash:
         cp = Crash.__new__(Crash)
         cp.target = self.target
         cp.tracer_bow = self.tracer_bow
+        cp.angr_project_bow = self.angr_project_bow
         cp.binary = self.binary
+        cp.trace_addr = self.trace_addr
         cp.crash = self.crash
         cp.input_type = self.input_type
         cp.project = self.project
@@ -712,12 +714,20 @@ class Crash:
             )
         self._preconstraining_input_data = input_data
 
-        state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
-        initial_state = state_bow.fire(
-            mode='tracing',
-            add_options=add_options,
-            remove_options=remove_options,
-        )
+        # if we already have a core dump, use it to create the initial state
+        if self.trace_addr:
+            initial_state = self.project.factory.blank_state(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options)
+            initial_state.regs.pc = self.trace_addr
+        else:
+            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
+            initial_state = state_bow.fire(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options,
+            )
 
         # initialize other settings
         initial_state.register_plugin('posix', SimSystemPosix(
