@@ -1,4 +1,5 @@
 import os
+import cle
 import angr
 import random
 import hashlib
@@ -513,6 +514,8 @@ class Crash:
         :return:    None
         """
 
+        self.binary = self.target.resolve_local_path(self.target.target_path)
+
         # Initialize an angr Project
 
         # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
@@ -533,7 +536,10 @@ class Crash:
                 r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True)
             self.project = self.angr_project_bow.fire(core_path=r.core_path)
 
-        self.binary = self.target.resolve_local_path(self.target.target_path)
+            # now use the original binary to revert the crash patch in the project
+            bin_loader = cle.Loader(self.binary)
+            orig_code = bin_loader.memory.load(self.trace_addr, 0x10) # TODO: better handle trap instruction size
+            self.project.loader.memory.store(self.trace_addr, orig_code)
 
         # Add custom hooks
         for addr, proc in self.hooks.items():
