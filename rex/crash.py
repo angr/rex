@@ -97,8 +97,6 @@ class Crash:
         self.prev = None
         self.trace_addr = trace_addr
         self.halfway_tracing = bool(trace_addr)
-        if self.trace_addr:
-            l.warning("trace_addr must be the start of a basic block, or tracing will fail")
         self._t = None
         self._traced = None
         self.added_actions = [ ]  # list of actions added during exploitation
@@ -638,10 +636,17 @@ class Crash:
             test_case = input_data
 
         # collect a concrete trace
+        # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
+        # which means the trace and the state may be inconsistent.
+        # But our tracer is smart enough to resolve the inconsistency
         save_core = True
         if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
             save_core = False
-        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core, trace_start_addr=self.trace_addr)
+        trace_truncate = None
+        if self.trace_addr:
+            min_addr = self.project.loader.find_object_containing(self.trace_addr).min_addr
+            trace_truncate = (min_addr, self.trace_addr)
+        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core, trace_truncate=trace_truncate)
 
         if save_core:
             # if a coredump is available, save a copy of all registers in the coredump for future references
