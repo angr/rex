@@ -727,6 +727,7 @@ class Crash:
                 add_options=add_options,
                 remove_options=remove_options)
             initial_state.regs.pc = self.trace_addr
+            self.project.loader.main_object = self.project.loader.main_object._main_object
         else:
             state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
             initial_state = state_bow.fire(
