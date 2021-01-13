@@ -441,6 +441,16 @@ def test_cromu71():
         # make sure it works
         nose.tools.assert_true(_do_pov_test(arsenal.best_type1))
 
+def test_halfway_tracing():
+    inp = b'A'*100
+    with archr.targets.LocalTarget(['./stack_smash'], target_arch='x86_64').build().start() as target:
+        bow = archr.arsenal.QEMUTracerBow(target)
+        crash = rex.Crash(target, inp, fast_mode=True, use_rop=True, tracer_bow=bow, trace_addr=0x4005bd)
+        exp = crash.exploit()
+
+        nose.tools.assert_true('rop_to_system' in exp.arsenal)
+        nose.tools.assert_true('rop_register_control' in exp.arsenal)
+
 def run_all():
     functions = globals()
     all_functions = dict(filter((lambda kv: kv[0].startswith('test_')), functions.items()))
