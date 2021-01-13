@@ -102,6 +102,7 @@ class Crash:
         self._t = None
         self._traced = None
         self.added_actions = [ ]  # list of actions added during exploitation
+        self.elfcore_obj = None # this is for the main_object swap hack
 
         self.symbolic_mem = None
         self.flag_mem = None
@@ -397,6 +398,7 @@ class Crash:
         cp.angr_project_bow = self.angr_project_bow
         cp.binary = self.binary
         cp.trace_addr = self.trace_addr
+        cp.elfcore_obj = self.elfcore_obj
         cp.crash = self.crash
         cp.input_type = self.input_type
         cp.project = self.project
@@ -528,18 +530,18 @@ class Crash:
         else:
             # to enable halfway-tracing, we need to generate a coredump at the wanted address first
             # and use the core dump to create an angr project
-            if self.target.target_arch != 'x86_64':
-                raise NotImplementedError("Currently, halfway-tracing only works with x86_64 binaries")
-
-            with self.target.shellcode_context(addr=self.trace_addr, bin_code=b'\xcc'):
+            crash_code = dsb.crash_shellcode()
+            with self.target.shellcode_context(addr=self.trace_addr, bin_code=crash_code):
                 # assuming no input is processes, yet
                 r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True)
             self.project = self.angr_project_bow.fire(core_path=r.core_path)
 
             # now use the original binary to revert the crash patch in the project
             bin_loader = cle.Loader(self.binary)
-            orig_code = bin_loader.memory.load(self.trace_addr, 0x10) # TODO: better handle trap instruction size
+            orig_code = bin_loader.memory.load(self.trace_addr, len(crash_code))
             self.project.loader.memory.store(self.trace_addr, orig_code)
+            self.elfcore_obj = self.project.loader.main_object
+            self.project.loader.main_object = self.project.loader.main_object._main_object
 
         # Add custom hooks
         for addr, proc in self.hooks.items():
@@ -722,6 +724,7 @@ class Crash:
 
         # if we already have a core dump, use it to create the initial state
         if self.trace_addr:
+            self.project.loader.main_object = self.elfcore_obj
             initial_state = self.project.factory.blank_state(
                 mode='tracing',
                 add_options=add_options,
