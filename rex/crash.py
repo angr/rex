@@ -96,6 +96,7 @@ class Crash:
         self.state = None
         self.prev = None
         self.trace_addr = trace_addr
+        self.trace_bb_addr = None
         self.halfway_tracing = bool(trace_addr)
         self._t = None
         self._traced = None
@@ -396,6 +397,7 @@ class Crash:
         cp.angr_project_bow = self.angr_project_bow
         cp.binary = self.binary
         cp.trace_addr = self.trace_addr
+        cp.trace_bb_addr = self.trace_bb_addr
         cp.elfcore_obj = self.elfcore_obj
         cp.crash = self.crash
         cp.input_type = self.input_type
@@ -529,18 +531,12 @@ class Crash:
             # to enable halfway-tracing, we need to generate a coredump at the wanted address first
             # and use the core dump to create an angr project
             l.debug("Generate core dump at address: %#x..", self.trace_addr)
-            crash_code = dsb.crash_shellcode()
-            with self.target.shellcode_context(addr=self.trace_addr, bin_code=crash_code):
-                # assuming no input is processes, yet
-                r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True, record_trace=False)
+            r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True,
+                                     record_trace=False, crash_addr=self.trace_addr)
 
             l.debug("Loading the core dump @ %s into angr...", r.core_path)
             self.project = self.angr_project_bow.fire(core_path=r.core_path)
 
-            # now use the original binary to revert the crash patch in the project
-            bin_loader = cle.Loader(self.binary)
-            orig_code = bin_loader.memory.load(self.trace_addr, len(crash_code))
-            self.project.loader.memory.store(self.trace_addr, orig_code)
             self.elfcore_obj = self.project.loader.main_object
             self.project.loader.main_object = self.project.loader.main_object._main_object
 
@@ -639,6 +635,9 @@ class Crash:
                 channel += ":0"
             test_case = input_data
 
+        if self.initial_state is None:
+            self.initial_state = self._create_initial_state(input_data, cgc_flag_page_magic=cgc_flag_page_magic)
+
         # collect a concrete trace
         # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
         # which means the trace and the state may be inconsistent.
@@ -646,11 +645,7 @@ class Crash:
         save_core = True
         if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
             save_core = False
-        trace_truncate = None
-        if self.trace_addr:
-            min_addr = self.project.loader.find_object_containing(self.trace_addr).min_addr
-            trace_truncate = (min_addr, self.trace_addr)
-        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core, trace_truncate=trace_truncate)
+        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core, trace_bb_addr=self.trace_bb_addr)
 
         if save_core:
             # if a coredump is available, save a copy of all registers in the coredump for future references
@@ -660,9 +655,6 @@ class Crash:
             else:
                 l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
                         r.core_path)
-
-        if self.initial_state is None:
-            self.initial_state = self._create_initial_state(input_data, cgc_flag_page_magic=cgc_flag_page_magic)
 
         simgr = self.project.factory.simulation_manager(
             self.initial_state,
@@ -738,8 +730,8 @@ class Crash:
                 mode='tracing',
                 add_options=add_options,
                 remove_options=remove_options)
-            initial_state.regs.pc = self.trace_addr
             self.project.loader.main_object = self.project.loader.main_object._main_object
+            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
         else:
             state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
             initial_state = state_bow.fire(
