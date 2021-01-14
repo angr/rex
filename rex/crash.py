@@ -528,10 +528,13 @@ class Crash:
         else:
             # to enable halfway-tracing, we need to generate a coredump at the wanted address first
             # and use the core dump to create an angr project
+            l.debug("Generate core dump at address: %#x..", self.trace_addr)
             crash_code = dsb.crash_shellcode()
             with self.target.shellcode_context(addr=self.trace_addr, bin_code=crash_code):
                 # assuming no input is processes, yet
-                r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True)
+                r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True, record_trace=False)
+
+            l.debug("Loading the core dump @ %s into angr...", r.core_path)
             self.project = self.angr_project_bow.fire(core_path=r.core_path)
 
             # now use the original binary to revert the crash patch in the project
@@ -556,6 +559,7 @@ class Crash:
                     # hash binary contents for rop cache name
                     binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
                     rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
+                l.debug("Initializing angrop...")
                 self.rop = self._initialize_rop(fast_mode=self._rop_fast_mode, rop_cache_tuple=self._rop_cache_tuple,
                                                 rop_cache_path=rop_cache_path)
         else:
