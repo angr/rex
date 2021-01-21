@@ -777,10 +777,8 @@ class Crash:
         # as a hack, we trigger the allocation of all sockets
         # FIXME: this should be done properly, maybe let user to provide a hook
         if self.halfway_tracing:
-            for i in range(10):
-                fd = initial_state.posix.open_socket(str(i))
-                sim_fd = initial_state.posix.fd[fd]
-                sim_fd.read_data(0)
+            for i in range(3, 10):
+                initial_state.posix.open_socket(str(i))
 
         # Loosen certain libc limits on symbolic input
         initial_state.libc.buf_symbolic_bytes = 3000
