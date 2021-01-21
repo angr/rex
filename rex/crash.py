@@ -100,6 +100,7 @@ class Crash:
         self.halfway_tracing = bool(trace_addr)
         self._t = None
         self._traced = None
+        self.trace_result = None
         self.added_actions = [ ]  # list of actions added during exploitation
         self.elfcore_obj = None # this is for the main_object swap hack
 
@@ -530,9 +531,11 @@ class Crash:
         else:
             # to enable halfway-tracing, we need to generate a coredump at the wanted address first
             # and use the core dump to create an angr project
-            l.debug("Generate core dump at address: %#x..", self.trace_addr)
-            r = self.tracer_bow.fire(testcase=b'', channel='stdio', save_core=True,
-                                     record_trace=False, crash_addr=self.trace_addr)
+            channel, test_case = self._prepare_channel()
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
+                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr)
+            self.trace_result = r
+            self._traced = True
 
             l.debug("Loading the core dump @ %s into angr...", r.core_path)
             self.project = self.angr_project_bow.fire(core_path=r.core_path)
@@ -601,30 +604,17 @@ class Crash:
         l.info("Triaging the crash.")
         self._triage_crash()
 
-    def _trace(self, pov_file=None, format_infos=None):
+    def _prepare_channel(self, pov_file=None):
         """
-        Symbolically trace the target program with the given input. A NonCrashingInput exception will be raised if the
-        target program does not crash with the given input.
-
-        :param pov_file:        CGC-specific setting.
-        :param format_infos:    CGC-specific setting.
-        :return:                None.
+        translate pov_file or input to channel and test_case
         """
-
         # sanity check
         if pov_file is None and self.crash is None:
             raise ValueError("Must specify either crash or pov_file.")
         if pov_file is not None and self.crash is not None:
             raise ValueError("Cannot specify both a pov_file and a crash.")
 
-        # faster place to check for non-crashing inputs
-        if self.is_cgc:
-            cgc_flag_page_magic = self._cgc_get_flag_page_magic()
-        else:
-            cgc_flag_page_magic = None
-
-        # Prepare the initial state
-
+        # prepare channel and test_case
         if pov_file is not None:
             test_case = TracerPoV(pov_file)
             channel = None
@@ -635,38 +625,62 @@ class Crash:
                 channel += ":0"
             test_case = input_data
 
+        return channel, test_case
+
+    def _trace(self, pov_file=None, format_infos=None):
+        """
+        Symbolically trace the target program with the given input. A NonCrashingInput exception will be raised if the
+        target program does not crash with the given input.
+
+        :param pov_file:        CGC-specific setting.
+        :param format_infos:    CGC-specific setting.
+        :return:                None.
+        """
+
+        # faster place to check for non-crashing inputs
+        if self.is_cgc:
+            cgc_flag_page_magic = self._cgc_get_flag_page_magic()
+        else:
+            cgc_flag_page_magic = None
+
+        # transform input to channel and test_case
+        channel, test_case = self._prepare_channel(pov_file=pov_file)
+
+        # Prepare the initial state
         if self.initial_state is None:
-            self.initial_state = self._create_initial_state(input_data, cgc_flag_page_magic=cgc_flag_page_magic)
+            self.initial_state = self._create_initial_state(test_case, cgc_flag_page_magic=cgc_flag_page_magic)
 
         # collect a concrete trace
         # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
         # which means the trace and the state may be inconsistent.
         # But our tracer is smart enough to resolve the inconsistency
-        save_core = True
-        if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
-            save_core = False
-        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core, trace_bb_addr=self.trace_bb_addr)
+        if not self.trace_result:
+            save_core = True
+            if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
+                save_core = False
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core, trace_bb_addr=self.trace_bb_addr)
 
-        if save_core:
-            # if a coredump is available, save a copy of all registers in the coredump for future references
-            if r.core_path and os.path.isfile(r.core_path):
-                tiny_core = TinyCore(r.core_path)
-                self.core_registers = tiny_core.registers
-            else:
-                l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
-                        r.core_path)
+            if save_core:
+                # if a coredump is available, save a copy of all registers in the coredump for future references
+                if r.core_path and os.path.isfile(r.core_path):
+                    tiny_core = TinyCore(r.core_path)
+                    self.core_registers = tiny_core.registers
+                else:
+                    l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
+                            r.core_path)
+            self.trace_result = r
 
         simgr = self.project.factory.simulation_manager(
             self.initial_state,
             save_unsat=False,
             hierarchy=False,
-            save_unconstrained=r.crashed
+            save_unconstrained=self.trace_result.crashed
         )
 
         # trace symbolically!
         # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
         # there are no aslr slides
-        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
+        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
         if self.is_cgc:
