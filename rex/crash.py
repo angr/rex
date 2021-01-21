@@ -39,7 +39,7 @@ class Crash:
                  explore_steps=0,
                  input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
                  checkpoint_path=None, crash_state=None, prev_state=None,
-                 trace_addr=None,
+                 trace_addr=None, delay=0,
                  #
                  # angrop-related settings
                  #
@@ -64,6 +64,8 @@ class Crash:
         :param crash_state:         An already traced crash state.
         :param prev_state:          The predecessor of the final crash state.
         :param trace_addr:          Used in half-way tracing, this is the address where tracing starts
+        :param delay:               Some targets need time to initialize, use this argument to tell tracer wait for
+                                    several seconds before trying to set up connection
 
         angrop-related settings:
         :param rop_cache_tuple:     A angrop tuple to load from.
@@ -79,6 +81,7 @@ class Crash:
         self.target_port = port
         self.crash = crash
         self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
+        self.delay = delay
 
         self.explore_steps = explore_steps
         if self.explore_steps > 10:
@@ -400,6 +403,7 @@ class Crash:
         cp.trace_addr = self.trace_addr
         cp.trace_bb_addr = self.trace_bb_addr
         cp.elfcore_obj = self.elfcore_obj
+        cp.delay = self.delay
         cp.crash = self.crash
         cp.input_type = self.input_type
         cp.project = self.project
@@ -533,7 +537,7 @@ class Crash:
             # and use the core dump to create an angr project
             channel, test_case = self._prepare_channel()
             r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
-                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr)
+                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay)
             self.trace_result = r
             self._traced = True
 
