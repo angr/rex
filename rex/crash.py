@@ -593,7 +593,6 @@ class Crash:
         if not self._traced:
             # Begin tracing!
             self._preconstraining_input_data = None
-            self._has_preconstrained = False
             self._trace(pov_file=pov_file,
                         format_infos=format_infos,
                         )
@@ -770,6 +769,15 @@ class Crash:
         if self.is_cgc:
             initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
 
+        # if we use halfway tracing, we need to reconstruct the sockets
+        # as a hack, we trigger the allocation of all sockets
+        # FIXME: this should be done properly, maybe let user to provide a hook
+        if self.halfway_tracing:
+            for i in range(10):
+                fd = initial_state.posix.open_socket(str(i))
+                sim_fd = initial_state.posix.fd[fd]
+                sim_fd.read_data(0)
+
         # Loosen certain libc limits on symbolic input
         initial_state.libc.buf_symbolic_bytes = 3000
         initial_state.libc.max_symbolic_strchr = 3000
@@ -786,13 +794,9 @@ class Crash:
         :return:        None
         """
 
-        if not self._has_preconstrained:
-            l.info("Preconstraining file stream %s upon the first read()." % fstream)
-            self._has_preconstrained = True
-            fstream.state.preconstrainer.preconstrain_file(self._preconstraining_input_data, fstream, set_length=True)
-        else:
-            l.error("Preconstraining is attempted twice, but currently Rex only supports preconstraining one file. "
-                    "Ignored.")
+
+        l.info("Preconstraining file stream %s upon the first read()." % fstream)
+        fstream.state.preconstrainer.preconstrain_file(self._preconstraining_input_data, fstream, set_length=True)
 
     def _cgc_get_flag_page_magic(self):
         """
