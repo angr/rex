@@ -5,6 +5,7 @@ import hashlib
 import logging
 import operator
 import pickle
+from typing import Union, Tuple
 
 from angr import sim_options as so
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
@@ -13,6 +14,7 @@ from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
 from angr.exploration_techniques.tracer import TracingMode
 import archr
+from archr.analyzers.angr_state import SimArchrMount, SimArchrProcMount
 from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
@@ -38,7 +40,7 @@ class Crash:
                  explore_steps=0,
                  input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
                  checkpoint_path=None, crash_state=None, prev_state=None,
-                 trace_addr=None, delay=0,
+                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
                  #
                  # angrop-related settings
                  #
@@ -62,7 +64,7 @@ class Crash:
                                     so on.
         :param crash_state:         An already traced crash state.
         :param prev_state:          The predecessor of the final crash state.
-        :param trace_addr:          Used in half-way tracing, this is the address where tracing starts
+        :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
         :param delay:               Some targets need time to initialize, use this argument to tell tracer wait for
                                     several seconds before trying to set up connection
 
@@ -81,6 +83,7 @@ class Crash:
         self.crash = crash
         self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
         self.delay = delay
+        self.pre_fire_hook = pre_fire_hook
 
         self.explore_steps = explore_steps
         if self.explore_steps > 10:
@@ -97,7 +100,7 @@ class Crash:
         self.initial_state = None
         self.state = None
         self.prev = None
-        self.trace_addr = trace_addr
+        self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
         self.trace_bb_addr = None
         self.halfway_tracing = bool(trace_addr)
         self._t = None
@@ -538,7 +541,8 @@ class Crash:
             # and use the core dump to create an angr project
             channel, test_case = self._prepare_channel()
             r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
-                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay)
+                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay,
+                                     pre_fire_hook=self.pre_fire_hook)
             self.trace_result = r
             self._traced = True
 
@@ -661,7 +665,8 @@ class Crash:
             save_core = True
             if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
                 save_core = False
-            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core, trace_bb_addr=self.trace_bb_addr)
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core,
+                                     trace_bb_addr=self.trace_bb_addr, pre_fire_hook=self.pre_fire_hook)
 
             if save_core:
                 # if a coredump is available, save a copy of all registers in the coredump for future references
@@ -716,7 +721,7 @@ class Crash:
                           so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
                           so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
         add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
-                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS}
+                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
 
         socket_queue = None
         stdin_file = None  # the file that will be fd 0
@@ -749,6 +754,7 @@ class Crash:
                 remove_options=remove_options)
             self.project.loader.main_object = self.project.loader.main_object._main_object
             self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
+            initial_state.fs.mount('/', SimArchrMount(self.target))
         else:
             state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
             initial_state = state_bow.fire(
@@ -757,8 +763,7 @@ class Crash:
                 remove_options=remove_options,
             )
 
-        # initialize other settings
-        initial_state.register_plugin('posix', SimSystemPosix(
+        posix = SimSystemPosix(
             stdin=stdin_file,
             stdout=SimFileStream(name='stdout'),
             stderr=SimFileStream(name='stderr'),
@@ -767,7 +772,10 @@ class Crash:
             environ=initial_state.posix.environ,
             auxv=initial_state.posix.auxv,
             socket_queue=socket_queue,
-        ))
+        )
+        # initialize other settings
+        initial_state.register_plugin('posix', posix)
+        initial_state.fs.mount('/proc', SimArchrProcMount(self.target))  # this has to happen after posix initializes
 
         initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
         if self.is_cgc:
