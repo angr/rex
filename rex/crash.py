@@ -1,5 +1,4 @@
 import os
-import cle
 import angr
 import random
 import hashlib
@@ -111,6 +110,8 @@ class Crash:
         self.flag_mem = None
         self.crash_types = [ ]  # crash type
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
+        self.core_registers = None
+        self._preconstraining_input_data = None
 
         # Initialize
         self._initialize(angrop_object, rop_cache_path, checkpoint_path, crash_state, prev_state)
@@ -325,7 +326,7 @@ class Crash:
         min_addr = self.project.loader.main_object.min_addr
         max_addr = self.project.loader.main_object.max_addr
         for addr in self.symbolic_mem:
-            if addr >= min_addr and addr < max_addr:
+            if min_addr <= addr < max_addr:
                 control[addr] = self.symbolic_mem[addr]
 
         return control
@@ -457,7 +458,7 @@ class Crash:
             try:
                 s = pickle.load(f)
             except EOFError as ex:
-                raise EOFError("Fail to restore from checkpoint %s", path)
+                raise EOFError("Fail to restore from checkpoint %s" % path) from ex
 
         keys = {'initial_state',
                 'crash_state',
@@ -572,7 +573,6 @@ class Crash:
             self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
         # Load cached/intermediate states
-        self.core_registers = None
         if crash_state is not None and prev_state is not None:
             self.state = crash_state
             self.prev = prev_state
@@ -797,7 +797,7 @@ class Crash:
         """
 
 
-        l.info("Preconstraining file stream %s upon the first read()." % fstream)
+        l.info("Preconstraining file stream %s upon the first read().", fstream)
         fstream.state.preconstrainer.preconstrain_file(self._preconstraining_input_data, fstream, set_length=True)
 
     def _cgc_get_flag_page_magic(self):
@@ -861,7 +861,7 @@ class Crash:
                 f.write(new_input)
 
         # create a new crash object starting here
-        use_rop = False if self.rop is None else True
+        use_rop = self.rop is not None
         self.__init__(self.target,
                 new_input,
                 tracer_bow=self.tracer_bow,
@@ -916,7 +916,7 @@ class Crash:
             with open(path_file, 'w') as f:
                 f.write(new_input)
 
-        use_rop = False if self.rop is None else True
+        use_rop = self.rop is not None
         self.__init__(self.target,
                 new_input,
                 tracer_bow=self.tracer_bow,
@@ -995,11 +995,8 @@ class Crash:
         symbolic_actions = [ ]
         if self._t is not None and self._t.last_state is not None:
             recent_actions = reversed(self._t.last_state.history.recent_actions)
-            state = self._t.last_state
-            # TODO: this is a dead assignment! what was this supposed to be?
         else:
             recent_actions = reversed(self.state.history.actions)
-            state = self.state
         for a in recent_actions:
             if a.type == 'mem':
                 if self.state.solver.symbolic(a.addr.ast):
@@ -1028,7 +1025,7 @@ class Crash:
                 self.violating_action = sym_action
                 break
 
-    def _reconstrain_flag_data(self, state):
+    def _reconstrain_flag_data(self, state):# pylint:disable=no-self-use
         """
         [CGC only] Constrain data in the flag page.
         """
