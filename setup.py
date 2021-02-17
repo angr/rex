@@ -17,8 +17,8 @@ setup(
         'angr',
         'archr',
         'angrop',
-        'tracer @ git+https://github.com/angr/tracer',
-        'povsim @ git+https://github.com/mechaphish/povsim',
-        'compilerex @ git+https://github.com/mechaphish/compilerex',
+        'tracer',
+        'povsim',
+        'compilerex',
     ],
 )
