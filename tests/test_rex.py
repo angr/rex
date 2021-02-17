@@ -443,7 +443,8 @@ def test_cromu71():
 
 def test_halfway_tracing():
     inp = b'A'*100
-    with archr.targets.LocalTarget(['./stack_smash'], target_arch='x86_64').build().start() as target:
+    bin_path = os.path.join(bin_location, "tests", "x86_64", "stack_smash")
+    with archr.targets.LocalTarget([bin_path], target_arch='x86_64').build().start() as target:
         bow = archr.arsenal.QEMUTracerBow(target)
         crash = rex.Crash(target, inp, fast_mode=True, use_rop=True, tracer_bow=bow, trace_addr=0x4005bd)
         exp = crash.exploit()
