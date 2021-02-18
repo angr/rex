@@ -5,6 +5,7 @@ import hashlib
 import logging
 import operator
 import pickle
+from typing import Union, Tuple
 
 from angr import sim_options as so
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
@@ -13,6 +14,7 @@ from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
 from angr.exploration_techniques.tracer import TracingMode
 import archr
+from archr.analyzers.angr_state import SimArchrMount, SimArchrProcMount
 from tracer import TracerPoV, TinyCore
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
@@ -38,6 +40,7 @@ class Crash:
                  explore_steps=0,
                  input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
                  checkpoint_path=None, crash_state=None, prev_state=None,
+                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
                  #
                  # angrop-related settings
                  #
@@ -61,6 +64,9 @@ class Crash:
                                     so on.
         :param crash_state:         An already traced crash state.
         :param prev_state:          The predecessor of the final crash state.
+        :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
+        :param delay:               Some targets need time to initialize, use this argument to tell tracer wait for
+                                    several seconds before trying to set up connection
 
         angrop-related settings:
         :param rop_cache_tuple:     A angrop tuple to load from.
@@ -76,6 +82,8 @@ class Crash:
         self.target_port = port
         self.crash = crash
         self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
+        self.delay = delay
+        self.pre_fire_hook = pre_fire_hook
 
         self.explore_steps = explore_steps
         if self.explore_steps > 10:
@@ -92,14 +100,21 @@ class Crash:
         self.initial_state = None
         self.state = None
         self.prev = None
+        self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
+        self.trace_bb_addr = None
+        self.halfway_tracing = bool(trace_addr)
         self._t = None
         self._traced = None
+        self.trace_result = None
         self.added_actions = [ ]  # list of actions added during exploitation
+        self.elfcore_obj = None # this is for the main_object swap hack
 
         self.symbolic_mem = None
         self.flag_mem = None
         self.crash_types = [ ]  # crash type
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
+        self.core_registers = None
+        self._preconstraining_input_data = None
 
         # Initialize
         self._initialize(angrop_object, rop_cache_path, checkpoint_path, crash_state, prev_state)
@@ -314,7 +329,7 @@ class Crash:
         min_addr = self.project.loader.main_object.min_addr
         max_addr = self.project.loader.main_object.max_addr
         for addr in self.symbolic_mem:
-            if addr >= min_addr and addr < max_addr:
+            if min_addr <= addr < max_addr:
                 control[addr] = self.symbolic_mem[addr]
 
         return control
@@ -338,7 +353,7 @@ class Crash:
         sp_base = self.initial_state.solver.eval(self.initial_state.regs.sp)
         for addr in self.symbolic_mem:
             # discard our fake heap etc
-            if addr > sp_base:
+            if addr > sp_base | 0xfff:
                 continue
 
             if below_sp:
@@ -387,7 +402,12 @@ class Crash:
         cp = Crash.__new__(Crash)
         cp.target = self.target
         cp.tracer_bow = self.tracer_bow
+        cp.angr_project_bow = self.angr_project_bow
         cp.binary = self.binary
+        cp.trace_addr = self.trace_addr
+        cp.trace_bb_addr = self.trace_bb_addr
+        cp.elfcore_obj = self.elfcore_obj
+        cp.delay = self.delay
         cp.crash = self.crash
         cp.input_type = self.input_type
         cp.project = self.project
@@ -441,7 +461,7 @@ class Crash:
             try:
                 s = pickle.load(f)
             except EOFError as ex:
-                raise EOFError("Fail to restore from checkpoint %s", path)
+                raise EOFError("Fail to restore from checkpoint %s" % path) from ex
 
         keys = {'initial_state',
                 'crash_state',
@@ -505,11 +525,32 @@ class Crash:
         :return:    None
         """
 
-        # Initialize an angr Project
-        dsb = archr.arsenal.DataScoutBow(self.target)
-        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
-        self.project = self.angr_project_bow.fire()
         self.binary = self.target.resolve_local_path(self.target.target_path)
+
+        # Initialize an angr Project
+
+        # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
+        # in the analyzer
+        dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
+        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
+
+        if not self.halfway_tracing:
+            self.project = self.angr_project_bow.fire()
+        else:
+            # to enable halfway-tracing, we need to generate a coredump at the wanted address first
+            # and use the core dump to create an angr project
+            channel, test_case = self._prepare_channel()
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
+                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay,
+                                     pre_fire_hook=self.pre_fire_hook)
+            self.trace_result = r
+            self._traced = True
+
+            l.debug("Loading the core dump @ %s into angr...", r.core_path)
+            self.project = self.angr_project_bow.fire(core_path=r.core_path)
+
+            self.elfcore_obj = self.project.loader.main_object
+            self.project.loader.main_object = self.project.loader.main_object._main_object
 
         # Add custom hooks
         for addr, proc in self.hooks.items():
@@ -526,6 +567,7 @@ class Crash:
                     # hash binary contents for rop cache name
                     binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
                     rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
+                l.debug("Initializing angrop...")
                 self.rop = self._initialize_rop(fast_mode=self._rop_fast_mode, rop_cache_tuple=self._rop_cache_tuple,
                                                 rop_cache_path=rop_cache_path)
         else:
@@ -535,7 +577,6 @@ class Crash:
             self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
         # Load cached/intermediate states
-        self.core_registers = None
         if crash_state is not None and prev_state is not None:
             self.state = crash_state
             self.prev = prev_state
@@ -560,7 +601,6 @@ class Crash:
         if not self._traced:
             # Begin tracing!
             self._preconstraining_input_data = None
-            self._has_preconstrained = False
             self._trace(pov_file=pov_file,
                         format_infos=format_infos,
                         )
@@ -570,6 +610,29 @@ class Crash:
 
         l.info("Triaging the crash.")
         self._triage_crash()
+
+    def _prepare_channel(self, pov_file=None):
+        """
+        translate pov_file or input to channel and test_case
+        """
+        # sanity check
+        if pov_file is None and self.crash is None:
+            raise ValueError("Must specify either crash or pov_file.")
+        if pov_file is not None and self.crash is not None:
+            raise ValueError("Cannot specify both a pov_file and a crash.")
+
+        # prepare channel and test_case
+        if pov_file is not None:
+            test_case = TracerPoV(pov_file)
+            channel = None
+        else:
+            input_data = self.crash
+            channel = self.input_type_to_channel_type(self.input_type)
+            if channel != "stdio":
+                channel += ":0"
+            test_case = input_data
+
+        return channel, test_case
 
     def _trace(self, pov_file=None, format_infos=None):
         """
@@ -581,59 +644,51 @@ class Crash:
         :return:                None.
         """
 
-        # sanity check
-        if pov_file is None and self.crash is None:
-            raise ValueError("Must specify either crash or pov_file.")
-        if pov_file is not None and self.crash is not None:
-            raise ValueError("Cannot specify both a pov_file and a crash.")
-
         # faster place to check for non-crashing inputs
         if self.is_cgc:
             cgc_flag_page_magic = self._cgc_get_flag_page_magic()
         else:
             cgc_flag_page_magic = None
 
-        # Prepare the initial state
+        # transform input to channel and test_case
+        channel, test_case = self._prepare_channel(pov_file=pov_file)
 
-        if pov_file is not None:
-            test_case = TracerPoV(pov_file)
-            channel = None
-        else:
-            input_data = self.crash
-            channel = self.input_type_to_channel_type(self.input_type)
-            if channel != "stdio":
-                channel += ":0"
-            test_case = input_data
+        # Prepare the initial state
+        if self.initial_state is None:
+            self.initial_state = self._create_initial_state(test_case, cgc_flag_page_magic=cgc_flag_page_magic)
 
         # collect a concrete trace
-        save_core = True
-        if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
-            save_core = False
-        r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core)
+        # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
+        # which means the trace and the state may be inconsistent.
+        # But our tracer is smart enough to resolve the inconsistency
+        if not self.trace_result:
+            save_core = True
+            if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
+                save_core = False
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core,
+                                     trace_bb_addr=self.trace_bb_addr, pre_fire_hook=self.pre_fire_hook)
 
-        if save_core:
-            # if a coredump is available, save a copy of all registers in the coredump for future references
-            if r.core_path and os.path.isfile(r.core_path):
-                tiny_core = TinyCore(r.core_path)
-                self.core_registers = tiny_core.registers
-            else:
-                l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
-                        r.core_path)
-
-        if self.initial_state is None:
-            self.initial_state = self._create_initial_state(input_data, cgc_flag_page_magic=cgc_flag_page_magic)
+            if save_core:
+                # if a coredump is available, save a copy of all registers in the coredump for future references
+                if r.core_path and os.path.isfile(r.core_path):
+                    tiny_core = TinyCore(r.core_path)
+                    self.core_registers = tiny_core.registers
+                else:
+                    l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
+                            r.core_path)
+            self.trace_result = r
 
         simgr = self.project.factory.simulation_manager(
             self.initial_state,
             save_unsat=False,
             hierarchy=False,
-            save_unconstrained=r.crashed
+            save_unconstrained=self.trace_result.crashed
         )
 
         # trace symbolically!
         # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
         # there are no aslr slides
-        self._t = r.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict)
+        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
         if self.is_cgc:
@@ -664,9 +719,9 @@ class Crash:
         # run the tracer, grabbing the crash state
         remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
                           so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
-                          so.ALL_FILES_EXIST}
+                          so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
         add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
-                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS}
+                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
 
         socket_queue = None
         stdin_file = None  # the file that will be fd 0
@@ -690,15 +745,25 @@ class Crash:
             )
         self._preconstraining_input_data = input_data
 
-        state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
-        initial_state = state_bow.fire(
-            mode='tracing',
-            add_options=add_options,
-            remove_options=remove_options,
-        )
+        # if we already have a core dump, use it to create the initial state
+        if self.trace_addr:
+            self.project.loader.main_object = self.elfcore_obj
+            initial_state = self.project.factory.blank_state(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options)
+            self.project.loader.main_object = self.project.loader.main_object._main_object
+            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
+            initial_state.fs.mount('/', SimArchrMount(self.target))
+        else:
+            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
+            initial_state = state_bow.fire(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options,
+            )
 
-        # initialize other settings
-        initial_state.register_plugin('posix', SimSystemPosix(
+        posix = SimSystemPosix(
             stdin=stdin_file,
             stdout=SimFileStream(name='stdout'),
             stderr=SimFileStream(name='stderr'),
@@ -707,11 +772,21 @@ class Crash:
             environ=initial_state.posix.environ,
             auxv=initial_state.posix.auxv,
             socket_queue=socket_queue,
-        ))
+        )
+        # initialize other settings
+        initial_state.register_plugin('posix', posix)
+        initial_state.fs.mount('/proc', SimArchrProcMount(self.target))  # this has to happen after posix initializes
 
         initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
         if self.is_cgc:
             initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
+
+        # if we use halfway tracing, we need to reconstruct the sockets
+        # as a hack, we trigger the allocation of all sockets
+        # FIXME: this should be done properly, maybe let user to provide a hook
+        if self.halfway_tracing:
+            for i in range(3, 10):
+                initial_state.posix.open_socket(str(i))
 
         # Loosen certain libc limits on symbolic input
         initial_state.libc.buf_symbolic_bytes = 3000
@@ -729,13 +804,9 @@ class Crash:
         :return:        None
         """
 
-        if not self._has_preconstrained:
-            l.info("Preconstraining file stream %s upon the first read()." % fstream)
-            self._has_preconstrained = True
-            fstream.state.preconstrainer.preconstrain_file(self._preconstraining_input_data, fstream, set_length=True)
-        else:
-            l.error("Preconstraining is attempted twice, but currently Rex only supports preconstraining one file. "
-                    "Ignored.")
+
+        l.info("Preconstraining file stream %s upon the first read().", fstream)
+        fstream.state.preconstrainer.preconstrain_file(self._preconstraining_input_data, fstream, set_length=True)
 
     def _cgc_get_flag_page_magic(self):
         """
@@ -798,7 +869,7 @@ class Crash:
                 f.write(new_input)
 
         # create a new crash object starting here
-        use_rop = False if self.rop is None else True
+        use_rop = self.rop is not None
         self.__init__(self.target,
                 new_input,
                 tracer_bow=self.tracer_bow,
@@ -853,7 +924,7 @@ class Crash:
             with open(path_file, 'w') as f:
                 f.write(new_input)
 
-        use_rop = False if self.rop is None else True
+        use_rop = self.rop is not None
         self.__init__(self.target,
                 new_input,
                 tracer_bow=self.tracer_bow,
@@ -932,11 +1003,8 @@ class Crash:
         symbolic_actions = [ ]
         if self._t is not None and self._t.last_state is not None:
             recent_actions = reversed(self._t.last_state.history.recent_actions)
-            state = self._t.last_state
-            # TODO: this is a dead assignment! what was this supposed to be?
         else:
             recent_actions = reversed(self.state.history.actions)
-            state = self.state
         for a in recent_actions:
             if a.type == 'mem':
                 if self.state.solver.symbolic(a.addr.ast):
@@ -965,7 +1033,7 @@ class Crash:
                 self.violating_action = sym_action
                 break
 
-    def _reconstrain_flag_data(self, state):
+    def _reconstrain_flag_data(self, state):# pylint:disable=no-self-use
         """
         [CGC only] Constrain data in the flag page.
         """
