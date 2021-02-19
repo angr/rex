@@ -51,7 +51,7 @@ class BaseCrash:
         self._rop_cache_tuple = rop_cache_tuple
         self._rop_cache_path = rop_cache_path
 
-    def _initialize_rop(self):
+    def initialize_rop(self):
         """
         Use angrop to generate ROP gadgets and such.
 
@@ -114,10 +114,9 @@ class SimCrash(BaseCrash):
         self.state = None
         self.prev = None
         self.core_registers = None
-        self._traced = None
         self.crash_input = None
 
-    def _initialize_project(self):
+    def initialize_project(self):
         assert self.project is not None
 
         if self.is_cgc:
@@ -127,16 +126,13 @@ class SimCrash(BaseCrash):
         if self._crash_state is not None and self._prev_state is not None:
             self.state = self._crash_state
             self.prev = self._prev_state
-            self._traced = True
         elif self._checkpoint_path is not None:
             l.info("Loading checkpoint file at %#s.", self._checkpoint_path)
             self.restore_checkpoint(self._checkpoint_path)
-            self._traced = True
         else:
             self.state = None
             self.prev = None
             self.initial_state = None
-            self._traced = False
 
     def get_sim_open_fds(self):
         try:
@@ -261,20 +257,109 @@ class CommCrash(SimCrash):
         self.pre_fire_hook = pre_fire_hook
         self.angr_project_bow = angr_project_bow
         self.binary = self.target.resolve_local_path(self.target.target_path)
+        self._test_case = None
+        self._channel = None
 
         # tracing related
         self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
         self.trace_bb_addr = None
         self.halfway_tracing = bool(trace_addr)
         self._t = None
-        self._traced = None
         self.trace_result = None
 
         # cgc related
         self.pov_file = pov_file
         self.format_infos = format_infos
 
-    def _create_project(self):
+    def concrete_trace(self):
+        """
+        collect a concrete trace
+        """
+        print("concrete tracing")
+
+        # transform input to channel and test_case
+        channel, test_case = self._prepare_channel()
+
+        if not self.halfway_tracing:
+            # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
+            # which means the trace and the state may be inconsistent.
+            # But our tracer is smart enough to resolve the inconsistency
+            save_core = True
+            if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
+                save_core = False
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core,
+                                     trace_bb_addr=self.trace_bb_addr, pre_fire_hook=self.pre_fire_hook)
+
+            if save_core:
+                # if a coredump is available, save a copy of all registers in the coredump for future references
+                if r.core_path and os.path.isfile(r.core_path):
+                    tiny_core = TinyCore(r.core_path)
+                    self.core_registers = tiny_core.registers
+                else:
+                    l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
+                            r.core_path)
+        else:
+            # to enable halfway-tracing, we need to generate a coredump at the wanted address first
+            # and use the core dump to create an angr project
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
+                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay,
+                                     pre_fire_hook=self.pre_fire_hook)
+        self.trace_result = r
+
+    def symbolic_trace(self):
+        """
+        Symbolically trace the target program with the given input. A NonCrashingInput exception will be raised if the
+        target program does not crash with the given input.
+
+        :return:                None.
+        """
+
+        if self.is_cgc:
+            cgc_flag_page_magic = self._cgc_get_flag_page_magic()
+        else:
+            cgc_flag_page_magic = None
+
+        # Prepare the initial state
+        if self.initial_state is None:
+            self.initial_state = self._create_initial_state(self._test_case, cgc_flag_page_magic=cgc_flag_page_magic)
+
+        simgr = self.project.factory.simulation_manager(
+            self.initial_state,
+            save_unsat=False,
+            hierarchy=False,
+            save_unconstrained=self.trace_result.crashed
+        )
+
+        # trace symbolically!
+        # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
+        # there are no aslr slides
+        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
+        simgr.use_technique(self._t)
+        simgr.use_technique(angr.exploration_techniques.Oppologist())
+        if self.is_cgc:
+            s = simgr.one_active
+            ChallRespInfo.prep_tracer(s, self.format_infos)
+            ZenPlugin.prep_tracer(s)
+        simgr.run()
+
+        # tracing completed
+        # if there was no crash we'll have to use the previous path's state
+        if 'crashed' in simgr.stashes:
+            # the state at crash time
+            self.state = simgr.crashed[0]
+            # a path leading up to the crashing basic block
+            self.prev = self._t.predecessors[-1]
+        else:
+            self.state = simgr.traced[0]
+            self.prev = self.state
+
+        zp = self.state.get_plugin('zen_plugin') if self.is_cgc else None
+        if 'crashed' not in simgr.stashes and zp is not None and len(zp.controlled_transmits) == 0:
+            l.warning("Input did not cause a crash.")
+            raise NonCrashingInput
+        l.debug("Done tracing input.")
+
+    def create_project(self):
         """
         create an angr project through archr
         """
@@ -290,17 +375,8 @@ class CommCrash(SimCrash):
         if not self.halfway_tracing:
             self.project = self.angr_project_bow.fire()
         else:
-            # to enable halfway-tracing, we need to generate a coredump at the wanted address first
-            # and use the core dump to create an angr project
-            channel, test_case = self._prepare_channel()
-            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
-                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay,
-                                     pre_fire_hook=self.pre_fire_hook)
-            self.trace_result = r
-            self._traced = True
-
-            l.debug("Loading the core dump @ %s into angr...", r.core_path)
-            self.project = self.angr_project_bow.fire(core_path=r.core_path)
+            l.debug("Loading the core dump @ %s into angr...", self.trace_result.core_path)
+            self.project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
 
             self.project.loader.main_object = self.project.loader.elfcore_object._main_object
 
@@ -385,84 +461,6 @@ class CommCrash(SimCrash):
 
         return initial_state
 
-    def _trace(self):
-        """
-        Symbolically trace the target program with the given input. A NonCrashingInput exception will be raised if the
-        target program does not crash with the given input.
-
-        :return:                None.
-        """
-
-        # faster place to check for non-crashing inputs
-        if self.is_cgc:
-            cgc_flag_page_magic = self._cgc_get_flag_page_magic()
-        else:
-            cgc_flag_page_magic = None
-
-        # transform input to channel and test_case
-        channel, test_case = self._prepare_channel()
-
-        # Prepare the initial state
-        if self.initial_state is None:
-            self.initial_state = self._create_initial_state(test_case, cgc_flag_page_magic=cgc_flag_page_magic)
-
-        # collect a concrete trace
-        # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
-        # which means the trace and the state may be inconsistent.
-        # But our tracer is smart enough to resolve the inconsistency
-        if not self.trace_result:
-            save_core = True
-            if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
-                save_core = False
-            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core,
-                                     trace_bb_addr=self.trace_bb_addr, pre_fire_hook=self.pre_fire_hook)
-
-            if save_core:
-                # if a coredump is available, save a copy of all registers in the coredump for future references
-                if r.core_path and os.path.isfile(r.core_path):
-                    tiny_core = TinyCore(r.core_path)
-                    self.core_registers = tiny_core.registers
-                else:
-                    l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
-                            r.core_path)
-            self.trace_result = r
-
-        simgr = self.project.factory.simulation_manager(
-            self.initial_state,
-            save_unsat=False,
-            hierarchy=False,
-            save_unconstrained=self.trace_result.crashed
-        )
-
-        # trace symbolically!
-        # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
-        # there are no aslr slides
-        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
-        simgr.use_technique(self._t)
-        simgr.use_technique(angr.exploration_techniques.Oppologist())
-        if self.is_cgc:
-            s = simgr.one_active
-            ChallRespInfo.prep_tracer(s, self.format_infos)
-            ZenPlugin.prep_tracer(s)
-        simgr.run()
-
-        # tracing completed
-        # if there was no crash we'll have to use the previous path's state
-        if 'crashed' in simgr.stashes:
-            # the state at crash time
-            self.state = simgr.crashed[0]
-            # a path leading up to the crashing basic block
-            self.prev = self._t.predecessors[-1]
-        else:
-            self.state = simgr.traced[0]
-            self.prev = self.state
-
-        zp = self.state.get_plugin('zen_plugin') if self.is_cgc else None
-        if 'crashed' not in simgr.stashes and zp is not None and len(zp.controlled_transmits) == 0:
-            l.warning("Input did not cause a crash.")
-            raise NonCrashingInput
-        l.debug("Done tracing input.")
-
     def _prepare_channel(self):
         """
         translate pov_file or input to channel and test_case
@@ -479,11 +477,12 @@ class CommCrash(SimCrash):
             channel = None
         else:
             input_data = self.crash_input
-            channel = self.input_type_to_channel_type(self.input_type)
+            channel = self._input_type_to_channel_type(self.input_type)
             if channel != "stdio":
                 channel += ":0"
             test_case = input_data
-
+        self._channel = channel
+        self._test_case = test_case
         return channel, test_case
 
     def _cgc_get_flag_page_magic(self):
@@ -501,7 +500,7 @@ class CommCrash(SimCrash):
         return r.magic_contents
 
     @staticmethod
-    def input_type_to_channel_type(input_type):
+    def _input_type_to_channel_type(input_type):
         if input_type == CrashInputType.STDIN:
             return "stdio"
         elif input_type == CrashInputType.TCP:
@@ -868,10 +867,10 @@ class Crash(CommCrash):
         :return:    None
         """
 
-        self._create_project()
-        self._initialize_rop()
-        self._initialize_project()
-
+        self.concrete_trace()
+        self.create_project()
+        self.initialize_rop()
+        self.initialize_project()
 
     def _work(self):
         """
@@ -879,9 +878,7 @@ class Crash(CommCrash):
 
         :return:    None
         """
-
-        if not self._traced:
-            self._trace()
+        self.symbolic_trace()
 
         l.info("Filtering memory writes.")
         self._filter_memory_writes()
