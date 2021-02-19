@@ -36,8 +36,7 @@ class Crash:
     """
 
     def __init__(self, target, crash=None, pov_file=None, aslr=None, constrained_addrs=None,
-                 hooks=None, format_infos=None, tracer_bow=None,
-                 explore_steps=0,
+                 format_infos=None, tracer_bow=None, angr_project_bow=None, explore_steps=0,
                  input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
                  checkpoint_path=None, crash_state=None, prev_state=None,
                  trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
@@ -53,11 +52,11 @@ class Crash:
         :param aslr:                Analyze the crash with aslr on or off.
         :param constrained_addrs:   List of addrs which have been constrained
                                     during exploration.
-        :param hooks:               Dictionary of simprocedure hooks, addresses
-                                    to simprocedures.
         :param format_infos:        A list of atoi FormatInfo objects that should
                                     be used when analyzing the crash.
         :param tracer_bow:          The bow instance to use for tracing operations
+        :param angr_project_bow:    The bow instance to use to create the project. this can be used to add custom
+                                    hooks and system call simprocedures
         :param explore_steps:       Number of steps which have already been explored, should
                                     only set by exploration methods.
         :param checkpoint_path:     Path to a checkpoint file that provides initial_state, prev_state, crash_state, and
@@ -76,12 +75,12 @@ class Crash:
 
         self.target = target # type: archr.targets.Target
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
-        self.hooks = {} if hooks is None else hooks
         self.use_crash_input = use_crash_input
         self.input_type = input_type
         self.target_port = port
         self.crash = crash
         self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
+        self.angr_project_bow = angr_project_bow # if it's None, it will get initialized later
         self.delay = delay
         self.pre_fire_hook = pre_fire_hook
 
@@ -93,7 +92,6 @@ class Crash:
         self._rop_fast_mode = fast_mode
         self._rop_cache_tuple = rop_cache_tuple
 
-        self.angr_project_bow = None
         self.project = None
         self.binary = None
         self.rop = None
@@ -529,10 +527,11 @@ class Crash:
 
         # Initialize an angr Project
 
-        # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
-        # in the analyzer
-        dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
-        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
+        if self.angr_project_bow is None:
+            # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
+            # in the analyzer
+            dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
+            self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
 
         if not self.halfway_tracing:
             self.project = self.angr_project_bow.fire()
@@ -548,14 +547,6 @@ class Crash:
 
             l.debug("Loading the core dump @ %s into angr...", r.core_path)
             self.project = self.angr_project_bow.fire(core_path=r.core_path)
-
-            self.elfcore_obj = self.project.loader.main_object
-            self.project.loader.main_object = self.project.loader.main_object._main_object
-
-        # Add custom hooks
-        for addr, proc in self.hooks.items():
-            self.project.hook(addr, proc)
-            l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
         # ROP-related stuff
         if self._use_rop:
@@ -747,12 +738,12 @@ class Crash:
 
         # if we already have a core dump, use it to create the initial state
         if self.trace_addr:
-            self.project.loader.main_object = self.elfcore_obj
+            self.project.loader.main_object = self.project.loader.elfcore_object
             initial_state = self.project.factory.blank_state(
                 mode='tracing',
                 add_options=add_options,
                 remove_options=remove_options)
-            self.project.loader.main_object = self.project.loader.main_object._main_object
+            self.project.loader.main_object = self.project.loader.elfcore_object._main_object
             self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
             initial_state.fs.mount('/', SimArchrMount(self.target))
         else:
