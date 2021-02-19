@@ -201,6 +201,97 @@ class SimCrash(BaseCrash):
             self.project.hook(addr, proc)
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
+    def get_sim_open_fds(self):
+        try:
+            open_fds = {'fd': [fd for fd in self.state.posix.fd if
+                        self.state.posix.fd[fd].read_storage.ident.startswith('aeg_stdin') and
+                        self.state.solver.eval(self.state.posix.fd[fd].read_storage.pos) > 0]
+            }
+        except StopIteration:
+            open_fds = { }
+        return open_fds
+
+    def _create_initial_state(self, input_data, cgc_flag_page_magic=None):
+
+        # run the tracer, grabbing the crash state
+        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
+                          so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
+                          so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
+        add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
+                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
+
+        socket_queue = None
+        stdin_file = None  # the file that will be fd 0
+
+        if self.input_type == CrashInputType.TCP:
+            socket_queue = [ ]
+            for i in range(10):
+                # Initialize the first N socket pairs
+                input_sock = SimPreconstrainedFileStream(
+                    preconstraining_handler=self._preconstrain_file,
+                    name="aeg_tcp_in_%d" % i,
+                    ident='aeg_stdin_%d' % i
+                )
+                output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
+                socket_queue.append([input_sock, output_sock])
+        else:
+            stdin_file = SimPreconstrainedFileStream(
+                preconstraining_handler=self._preconstrain_file,
+                name='stdin',
+                ident='aeg_stdin'
+            )
+        self._preconstraining_input_data = input_data
+
+        # if we already have a core dump, use it to create the initial state
+        if self.trace_addr:
+            self.project.loader.main_object = self.elfcore_obj
+            initial_state = self.project.factory.blank_state(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options)
+            self.project.loader.main_object = self.project.loader.main_object._main_object
+            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
+            initial_state.fs.mount('/', SimArchrMount(self.target))
+        else:
+            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
+            initial_state = state_bow.fire(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options,
+            )
+
+        posix = SimSystemPosix(
+            stdin=stdin_file,
+            stdout=SimFileStream(name='stdout'),
+            stderr=SimFileStream(name='stderr'),
+            argc=initial_state.posix.argc,
+            argv=initial_state.posix.argv,
+            environ=initial_state.posix.environ,
+            auxv=initial_state.posix.auxv,
+            socket_queue=socket_queue,
+        )
+        # initialize other settings
+        initial_state.register_plugin('posix', posix)
+        initial_state.fs.mount('/proc', SimArchrProcMount(self.target))  # this has to happen after posix initializes
+
+        initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+        if self.is_cgc:
+            initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
+
+        # if we use halfway tracing, we need to reconstruct the sockets
+        # as a hack, we trigger the allocation of all sockets
+        # FIXME: this should be done properly, maybe let user to provide a hook
+        if self.halfway_tracing:
+            for i in range(3, 10):
+                initial_state.posix.open_socket(str(i))
+
+        # Loosen certain libc limits on symbolic input
+        initial_state.libc.buf_symbolic_bytes = 3000
+        initial_state.libc.max_symbolic_strchr = 3000
+        initial_state.libc.max_str_len = 3000
+        initial_state.libc.max_buffer_size = 16384
+
+        return initial_state
 
     ####### checkpoint related ########
     def restore_checkpoint(self, path):
@@ -249,7 +340,6 @@ class SimCrash(BaseCrash):
         }
         with open(path, "wb") as f:
             pickle.dump(s, f)
-
 
 class Crash(SimCrash):
     """
@@ -309,13 +399,13 @@ class Crash(SimCrash):
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
         self._preconstraining_input_data = None
 
+        # Initialize
+        self._initialize()
+
         # by default, we assume non-cgc OS has ASLR on
         self.aslr = aslr
         if aslr is None:
             self.aslr = not self.is_cgc
-
-        # Initialize
-        self._initialize()
 
         # Work
         self._work(pov_file, format_infos)
@@ -340,14 +430,7 @@ class Crash(SimCrash):
         if self.input_type == CrashInputType.TCP:
             opts = kwargs.get('shellcode_opts', {})
             # are there open sockets that can receive our input?
-            try:
-                open_fds = {'fd': [fd for fd in self.state.posix.fd if
-                            self.state.posix.fd[fd].read_storage.ident.startswith('aeg_stdin') and
-                            self.state.solver.eval(self.state.posix.fd[fd].read_storage.pos) > 0]
-                }
-            except StopIteration:
-                open_fds = { }
-
+            open_fds = self.get_sim_open_fds()
             if open_fds:
                 # there is an open socket
                 # try dupsh to get a shell
@@ -752,88 +835,6 @@ class Crash(SimCrash):
             l.warning("Input did not cause a crash.")
             raise NonCrashingInput
         l.debug("Done tracing input.")
-
-    def _create_initial_state(self, input_data, cgc_flag_page_magic=None):
-
-        # run the tracer, grabbing the crash state
-        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
-                          so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
-                          so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
-        add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
-                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
-
-        socket_queue = None
-        stdin_file = None  # the file that will be fd 0
-
-        if self.input_type == CrashInputType.TCP:
-            socket_queue = [ ]
-            for i in range(10):
-                # Initialize the first N socket pairs
-                input_sock = SimPreconstrainedFileStream(
-                    preconstraining_handler=self._preconstrain_file,
-                    name="aeg_tcp_in_%d" % i,
-                    ident='aeg_stdin_%d' % i
-                )
-                output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
-                socket_queue.append([input_sock, output_sock])
-        else:
-            stdin_file = SimPreconstrainedFileStream(
-                preconstraining_handler=self._preconstrain_file,
-                name='stdin',
-                ident='aeg_stdin'
-            )
-        self._preconstraining_input_data = input_data
-
-        # if we already have a core dump, use it to create the initial state
-        if self.trace_addr:
-            self.project.loader.main_object = self.elfcore_obj
-            initial_state = self.project.factory.blank_state(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options)
-            self.project.loader.main_object = self.project.loader.main_object._main_object
-            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
-            initial_state.fs.mount('/', SimArchrMount(self.target))
-        else:
-            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
-            initial_state = state_bow.fire(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options,
-            )
-
-        posix = SimSystemPosix(
-            stdin=stdin_file,
-            stdout=SimFileStream(name='stdout'),
-            stderr=SimFileStream(name='stderr'),
-            argc=initial_state.posix.argc,
-            argv=initial_state.posix.argv,
-            environ=initial_state.posix.environ,
-            auxv=initial_state.posix.auxv,
-            socket_queue=socket_queue,
-        )
-        # initialize other settings
-        initial_state.register_plugin('posix', posix)
-        initial_state.fs.mount('/proc', SimArchrProcMount(self.target))  # this has to happen after posix initializes
-
-        initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-        if self.is_cgc:
-            initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
-
-        # if we use halfway tracing, we need to reconstruct the sockets
-        # as a hack, we trigger the allocation of all sockets
-        # FIXME: this should be done properly, maybe let user to provide a hook
-        if self.halfway_tracing:
-            for i in range(3, 10):
-                initial_state.posix.open_socket(str(i))
-
-        # Loosen certain libc limits on symbolic input
-        initial_state.libc.buf_symbolic_bytes = 3000
-        initial_state.libc.max_symbolic_strchr = 3000
-        initial_state.libc.max_str_len = 3000
-        initial_state.libc.max_buffer_size = 16384
-
-        return initial_state
 
     def _preconstrain_file(self, fstream):
         """
