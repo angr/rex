@@ -446,8 +446,8 @@ def test_halfway_tracing():
     inp = b'A'*100
     bin_path = os.path.join(bin_location, "tests", "x86_64", "stack_smash")
     with archr.targets.LocalTarget([bin_path], target_arch='x86_64').build().start() as target:
-        bow = archr.arsenal.QEMUTracerBow(target)
-        crash = rex.Crash(target, inp, fast_mode=True, use_rop=True, tracer_bow=bow, trace_addr=0x4005bd)
+        tracer_opts = {"trace_addr": 0x4005bd}
+        crash = rex.Crash(target, inp, fast_mode=True, use_rop=True, trace_mode="halfway", tracer_opts=tracer_opts)
         exp = crash.exploit()
 
         nose.tools.assert_true('rop_to_system' in exp.arsenal)

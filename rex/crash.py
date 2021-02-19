@@ -5,22 +5,21 @@ import hashlib
 import logging
 import operator
 import pickle
-from typing import Union, Tuple
 
-from angr import sim_options as so
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
 from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
 from angr.exploration_techniques.tracer import TracingMode
 import archr
-from archr.analyzers.angr_state import SimArchrMount, SimArchrProcMount
-from tracer import TracerPoV, TinyCore
+from tracer import TracerPoV
+from archr.analyzers.angr_state import SimArchrProcMount
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
 from .vulnerability import Vulnerability
 from .enums import CrashInputType
 from .preconstrained_file_stream import SimPreconstrainedFileStream
+from .crash_tracer import TraceMode, SimTracer, HalfwayTracer, DumbTracer
 
 
 l = logging.getLogger("rex.Crash")
@@ -228,13 +227,16 @@ class CommCrash(SimCrash):
     """
     Even more advanced crash object handling target communication and tracing
     """
-    def __init__(self, target, tracer_bow=None, angr_project_bow=None, input_type=CrashInputType.STDIN, port=None,
-                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
+    def __init__(self, target, trace_mode=TraceMode.FULL_SYMBOLIC, tracer_opts=None, tracer_bow=None, angr_project_bow=None,
+                 input_type=CrashInputType.STDIN, port=None,
+                 delay=0, pre_fire_hook=None, angr_project_bow=None
                  pov_file=None, format_infos=None, **kwargs):
         """
         :param target:              archr Target that contains the binary that crashed.
-        :param tracer_bow:          The bow instance to use for tracing operations
-        :param angr_project_bow:    The project bow to use, can be used for custom hooks and syscalls
+        :param trace_mode           the tracer to use. Currently supports "dumb", "halfway" and "full_symbolic"
+        :param tracer_opts          specify options for tracer, see CrashTracer
+        :param tracer_bow:          (deprecated)The bow instance to use for tracing operations
+        :param angr_project_bow:    (deprecated)The project bow to use, can be used for custom hooks and syscalls
         :param input_type:          the way the program takes input, usually CrashInputType.STDIN
         :param port:                In the case where the target takes TCP input, which port to connect to
         :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
@@ -250,20 +252,34 @@ class CommCrash(SimCrash):
 
         # communication related
         self.target = target # type: archr.targets.Target
-        self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
         self.input_type = input_type
         self.target_port = port
         self.delay = delay
         self.pre_fire_hook = pre_fire_hook
-        self.angr_project_bow = angr_project_bow
+
         self.binary = self.target.resolve_local_path(self.target.target_path)
         self._test_case = None
         self._channel = None
+        self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
 
         # tracing related
-        self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
-        self.trace_bb_addr = None
-        self.halfway_tracing = bool(trace_addr)
+        if tracer_opts is None: tracer_opts = {}
+        tracer_bow = tracer_opts.pop("tracer_bow", None)
+        if tracer_bow is None:
+            tracer_bow = archr.arsenal.QEMUTracerBow(self.target)
+        tracer_opts['tracer_bow'] = tracer_bow
+        if tracer_opts.pop("angr_project_bow", None) is None:
+            tracer_opts['angr_project_bow'] = angr_project_bow
+
+        if trace_mode == TraceMode.FULL_SYMBOLIC:
+            self.tracer = SimTracer(**tracer_opts)
+        elif trace_mode == TraceMode.HALFWAY:
+            self.tracer = HalfwayTracer(**tracer_opts)
+        elif trace_mode == TraceMode.DUMB:
+            self.tracer = DumbTracer(**tracer_opts)
+        else:
+            raise ValueError("Unknown trace_mode: %s" % trace_mode)
+
         self._t = None
         self.trace_result = None
 
@@ -275,36 +291,9 @@ class CommCrash(SimCrash):
         """
         collect a concrete trace
         """
-        print("concrete tracing")
-
         # transform input to channel and test_case
-        channel, test_case = self._prepare_channel()
-
-        if not self.halfway_tracing:
-            # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
-            # which means the trace and the state may be inconsistent.
-            # But our tracer is smart enough to resolve the inconsistency
-            save_core = True
-            if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
-                save_core = False
-            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core,
-                                     trace_bb_addr=self.trace_bb_addr, pre_fire_hook=self.pre_fire_hook)
-
-            if save_core:
-                # if a coredump is available, save a copy of all registers in the coredump for future references
-                if r.core_path and os.path.isfile(r.core_path):
-                    tiny_core = TinyCore(r.core_path)
-                    self.core_registers = tiny_core.registers
-                else:
-                    l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
-                            r.core_path)
-        else:
-            # to enable halfway-tracing, we need to generate a coredump at the wanted address first
-            # and use the core dump to create an angr project
-            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
-                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay,
-                                     pre_fire_hook=self.pre_fire_hook)
-        self.trace_result = r
+        channel, testcase = self._prepare_channel()
+        self.trace_result, self.core_registers = self.tracer._concrete_trace(testcase, channel, self.pre_fire_hook, self.delay)
 
     def symbolic_trace(self):
         """
@@ -333,7 +322,8 @@ class CommCrash(SimCrash):
         # trace symbolically!
         # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
         # there are no aslr slides
-        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
+        forward = isinstance(self.tracer, SimTracer)
+        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=forward)
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
         if self.is_cgc:
@@ -365,29 +355,10 @@ class CommCrash(SimCrash):
         """
         # Initialize an angr Project
 
-        # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
-        # in the analyzer
-        if self.angr_project_bow is None:
-            # for core files we don't want/need a datascout analyzer
-            scout = None if self.halfway_tracing else archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
-            self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, scout_analyzer=scout)
-
-        if not self.halfway_tracing:
-            self.project = self.angr_project_bow.fire()
-        else:
-            l.debug("Loading the core dump @ %s into angr...", self.trace_result.core_path)
-            self.project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
-
-            self.project.loader.main_object = self.project.loader.elfcore_object._main_object
+        self.project = self.tracer._create_project(self.target)
 
     def _create_initial_state(self, testcase, cgc_flag_page_magic=None):
 
-        # run the tracer, grabbing the crash state
-        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
-                          so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
-                          so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
-        add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
-                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
         assert type(testcase) == bytes, "TracePov is no longer supported"
 
         stdin_file = None
@@ -411,22 +382,7 @@ class CommCrash(SimCrash):
             )
 
         # if we already have a core dump, use it to create the initial state
-        if self.halfway_tracing:
-            self.project.loader.main_object = self.project.loader.elfcore_object
-            initial_state = self.project.factory.blank_state(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options)
-            self.project.loader.main_object = self.project.loader.elfcore_object._main_object
-            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
-            initial_state.fs.mount('/', SimArchrMount(self.target))
-        else:
-            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
-            initial_state = state_bow.fire(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options,
-            )
+        initial_state = self.tracer._create_state(self.target)
 
         posix = SimSystemPosix(
             stdin=stdin_file,
@@ -446,18 +402,13 @@ class CommCrash(SimCrash):
         if self.is_cgc:
             initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
 
-        # if we use halfway tracing, we need to reconstruct the sockets
-        # as a hack, we trigger the allocation of all sockets
-        # FIXME: this should be done properly, maybe let user to provide a hook
-        if self.halfway_tracing:
-            for i in range(3, 10):
-                initial_state.posix.open_socket(str(i))
-
         # Loosen certain libc limits on symbolic input
         initial_state.libc.buf_symbolic_bytes = 3000
         initial_state.libc.max_symbolic_strchr = 3000
         initial_state.libc.max_str_len = 3000
         initial_state.libc.max_buffer_size = 16384
+
+        self.tracer._bootstrap_state(initial_state)
 
         return initial_state
 
@@ -826,12 +777,8 @@ class Crash(CommCrash):
     def copy(self):
         cp = Crash.__new__(Crash)
         cp.target = self.target
-        cp.tracer_bow = self.tracer_bow
-        cp.angr_project_bow = self.angr_project_bow
         cp.binary = self.binary
-        cp.trace_addr = self.trace_addr
-        cp.trace_bb_addr = self.trace_bb_addr
-        cp.delay = self.delay
+        cp.tracer = self.tracer
         cp.crash_input = self.crash_input
         cp.input_type = self.input_type
         cp.project = self.project
