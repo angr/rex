@@ -12,7 +12,7 @@ from archr.analyzers.angr_state import SimArchrMount
 l = logging.getLogger("rex.CrashTracer")
 
 class TraceMode:
-    DUMB            =   "dumb" 
+    DUMB            =   "dumb"
     HALFWAY         =   "halfway"
     FULL_SYMBOLIC   =   "full_symbolic"
 
@@ -148,5 +148,43 @@ class HalfwayTracer(CrashTracer):
         return state
 
 class DumbTracer(CrashTracer):
+    """
+    automatically identify accept library call and then generate coredump from here
+    """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.trace_result = None
+        self.elfcore_obj = None
+
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0):
+        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True,
+                                 pre_fire_hook=pre_fire_hook, record_trace=False)
+        self.trace_result = r
+
+        # if a coredump is available, save a copy of all registers in the coredump for future references
+        assert r.core_path and os.path.isfile(r.core_path)
+        tiny_core = TinyCore(r.core_path)
+        return r, tiny_core.registers
+
+    def _create_project(self, target, **kwargs):
+        l.debug("Loading the core dump @ %s into angr...", self.trace_result.core_path)
+        self._init_angr_project_bow(target)
+        project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
+
+        self.elfcore_obj = project.loader.main_object
+        project.loader.main_object = project.loader.main_object._main_object
+        self.project = project
+        return project
+
+    def _create_state(self, target, **kwargs):
+        self.project.loader.main_object = self.elfcore_obj
+        initial_state = self.project.factory.blank_state(
+            mode='tracing',
+            add_options=add_options,
+            remove_options=remove_options)
+        self.project.loader.main_object = self.project.loader.main_object._main_object
+        initial_state.fs.mount('/', SimArchrMount(target))
+        return initial_state
+
+    def _bootstrap_state(self, state, **kwargs):
+        return state

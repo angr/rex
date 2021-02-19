@@ -408,7 +408,7 @@ class CommCrash(SimCrash):
         initial_state.libc.max_str_len = 3000
         initial_state.libc.max_buffer_size = 16384
 
-        self.tracer._bootstrap_state(initial_state)
+        initial_state = self.tracer._bootstrap_state(initial_state)
 
         return initial_state
 
