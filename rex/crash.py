@@ -119,7 +119,6 @@ class SimCrash(BaseCrash):
         self.core_registers = None
         self._traced = None
         self.crash_input = None
-        self.added_actions = [ ]  # list of actions added during exploitation
 
     def _initialize_project(self):
         assert self.project is not None
@@ -242,7 +241,8 @@ class CommCrash(SimCrash):
     Even more advanced crash object handling target communication and tracing
     """
     def __init__(self, target, tracer_bow=None, input_type=CrashInputType.STDIN, port=None,
-                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None, **kwargs):
+                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
+                 pov_file=None, format_infos=None, **kwargs):
         """
         :param target:              archr Target that contains the binary that crashed.
         :param tracer_bow:          The bow instance to use for tracing operations
@@ -253,6 +253,9 @@ class CommCrash(SimCrash):
                                     several seconds before trying to set up connection
         :param pre_fire_hook:       function hook that is executed after the target is launched before the input is sent
                                     to the target
+        :param pov_file:            CGC PoV describing a crash.
+        :param format_infos:        A list of atoi FormatInfo objects that should
+                                    be used when analyzing the crash.
         """
         super().__init__(**kwargs)
 
@@ -271,8 +274,13 @@ class CommCrash(SimCrash):
         self.trace_bb_addr = None
         self.halfway_tracing = bool(trace_addr)
         self._t = None
+        self._traced = None
         self.trace_result = None
         self.elfcore_obj = None # this is for the main_object swap hack
+
+        # cgc related
+        self.pov_file = pov_file
+        self.format_infos = format_infos
 
     def _create_project(self):
         """
@@ -302,43 +310,6 @@ class CommCrash(SimCrash):
 
             self.elfcore_obj = self.project.loader.main_object
             self.project.loader.main_object = self.project.loader.main_object._main_object
-
-    def _prepare_channel(self, pov_file=None):
-        """
-        translate pov_file or input to channel and test_case
-        """
-        # sanity check
-        if pov_file is None and self.crash_input is None:
-            raise ValueError("Must specify either crash or pov_file.")
-        if pov_file is not None and self.crash_input is not None:
-            raise ValueError("Cannot specify both a pov_file and a crash.")
-
-        # prepare channel and test_case
-        if pov_file is not None:
-            test_case = TracerPoV(pov_file)
-            channel = None
-        else:
-            input_data = self.crash_input
-            channel = self.input_type_to_channel_type(self.input_type)
-            if channel != "stdio":
-                channel += ":0"
-            test_case = input_data
-
-        return channel, test_case
-
-    @staticmethod
-    def input_type_to_channel_type(input_type):
-        if input_type == CrashInputType.STDIN:
-            return "stdio"
-        elif input_type == CrashInputType.TCP:
-            return 'tcp'
-        elif input_type == CrashInputType.TCP6:
-            return 'tcp6'
-        elif input_type == CrashInputType.UDP:
-            return 'udp'
-        elif input_type == CrashInputType.UDP6:
-            return 'udp6'
-        raise NotImplementedError("Unsupported input type %s." % input_type)
 
     def _create_initial_state(self, testcase, cgc_flag_page_magic=None):
 
@@ -421,6 +392,135 @@ class CommCrash(SimCrash):
 
         return initial_state
 
+    def _trace(self):
+        """
+        Symbolically trace the target program with the given input. A NonCrashingInput exception will be raised if the
+        target program does not crash with the given input.
+
+        :return:                None.
+        """
+
+        # faster place to check for non-crashing inputs
+        if self.is_cgc:
+            cgc_flag_page_magic = self._cgc_get_flag_page_magic()
+        else:
+            cgc_flag_page_magic = None
+
+        # transform input to channel and test_case
+        channel, test_case = self._prepare_channel()
+
+        # Prepare the initial state
+        if self.initial_state is None:
+            self.initial_state = self._create_initial_state(test_case, cgc_flag_page_magic=cgc_flag_page_magic)
+
+        # collect a concrete trace
+        # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
+        # which means the trace and the state may be inconsistent.
+        # But our tracer is smart enough to resolve the inconsistency
+        if not self.trace_result:
+            save_core = True
+            if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
+                save_core = False
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core,
+                                     trace_bb_addr=self.trace_bb_addr, pre_fire_hook=self.pre_fire_hook)
+
+            if save_core:
+                # if a coredump is available, save a copy of all registers in the coredump for future references
+                if r.core_path and os.path.isfile(r.core_path):
+                    tiny_core = TinyCore(r.core_path)
+                    self.core_registers = tiny_core.registers
+                else:
+                    l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
+                            r.core_path)
+            self.trace_result = r
+
+        simgr = self.project.factory.simulation_manager(
+            self.initial_state,
+            save_unsat=False,
+            hierarchy=False,
+            save_unconstrained=self.trace_result.crashed
+        )
+
+        # trace symbolically!
+        # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
+        # there are no aslr slides
+        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
+        simgr.use_technique(self._t)
+        simgr.use_technique(angr.exploration_techniques.Oppologist())
+        if self.is_cgc:
+            s = simgr.one_active
+            ChallRespInfo.prep_tracer(s, self.format_infos)
+            ZenPlugin.prep_tracer(s)
+        simgr.run()
+
+        # tracing completed
+        # if there was no crash we'll have to use the previous path's state
+        if 'crashed' in simgr.stashes:
+            # the state at crash time
+            self.state = simgr.crashed[0]
+            # a path leading up to the crashing basic block
+            self.prev = self._t.predecessors[-1]
+        else:
+            self.state = simgr.traced[0]
+            self.prev = self.state
+
+        zp = self.state.get_plugin('zen_plugin') if self.is_cgc else None
+        if 'crashed' not in simgr.stashes and zp is not None and len(zp.controlled_transmits) == 0:
+            l.warning("Input did not cause a crash.")
+            raise NonCrashingInput
+        l.debug("Done tracing input.")
+
+    def _prepare_channel(self):
+        """
+        translate pov_file or input to channel and test_case
+        """
+        # sanity check
+        if self.pov_file is None and self.crash_input is None:
+            raise ValueError("Must specify either crash or pov_file.")
+        if self.pov_file is not None and self.crash_input is not None:
+            raise ValueError("Cannot specify both a pov_file and a crash.")
+
+        # prepare channel and test_case
+        if self.pov_file is not None:
+            test_case = TracerPoV(self.pov_file)
+            channel = None
+        else:
+            input_data = self.crash_input
+            channel = self.input_type_to_channel_type(self.input_type)
+            if channel != "stdio":
+                channel += ":0"
+            test_case = input_data
+
+        return channel, test_case
+
+    def _cgc_get_flag_page_magic(self):
+        """
+        [CGC only] Get the magic content in flag page for CGC binaries.
+
+        :return:    The magic page content.
+        """
+
+        r = self.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash_input)
+        if not r.crashed:
+            if not self.tracer_bow.fire(save_core=True, testcase=self.crash_input, report_bad_args=True).crashed:
+                l.warning("input did not cause a crash")
+                raise NonCrashingInput
+        return r.magic_contents
+
+    @staticmethod
+    def input_type_to_channel_type(input_type):
+        if input_type == CrashInputType.STDIN:
+            return "stdio"
+        elif input_type == CrashInputType.TCP:
+            return 'tcp'
+        elif input_type == CrashInputType.TCP6:
+            return 'tcp6'
+        elif input_type == CrashInputType.UDP:
+            return 'udp'
+        elif input_type == CrashInputType.UDP6:
+            return 'udp6'
+        raise NotImplementedError("Unsupported input type %s." % input_type)
+
 class Crash(CommCrash):
     """
     Triage and exploit a crash using angr.
@@ -428,17 +528,11 @@ class Crash(CommCrash):
     """
 
     def __init__(self, target, crash=None, pov_file=None, aslr=None,
-                 format_infos=None, explore_steps=0, use_crash_input=False,
-                 **kwargs
-                 ):
+                 use_crash_input=False, explore_steps=0, **kwargs):
         """
         :param crash:               String of input which crashed the binary.
         :param pov_file:            CGC PoV describing a crash.
         :param aslr:                Analyze the crash with aslr on or off.
-        :param format_infos:        A list of atoi FormatInfo objects that should
-                                    be used when analyzing the crash.
-        :param explore_steps:       Number of steps which have already been explored, should
-                                    only set by exploration methods.
         :param use_crash_input:     if a byte is not constrained by the generated exploits,
                                     use the original crash input to fill the byte.
         """
@@ -454,6 +548,7 @@ class Crash(CommCrash):
 
         self.symbolic_mem = None
         self.flag_mem = None
+        self.added_actions = [ ]  # list of actions added during exploitation
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
 
         # Initialize
@@ -465,7 +560,7 @@ class Crash(CommCrash):
             self.aslr = not self.is_cgc
 
         # Work
-        self._work(pov_file, format_infos)
+        self._work()
 
     #
     # Public methods
@@ -786,7 +881,7 @@ class Crash(CommCrash):
         self._initialize_project()
 
 
-    def _work(self, pov_file, format_infos):
+    def _work(self):
         """
         Perform tracing, memory write filtering, and crash triaging.
 
@@ -794,109 +889,13 @@ class Crash(CommCrash):
         """
 
         if not self._traced:
-            self._trace(pov_file=pov_file,
-                        format_infos=format_infos,
-                        )
+            self._trace()
 
         l.info("Filtering memory writes.")
         self._filter_memory_writes()
 
         l.info("Triaging the crash.")
         self._triage_crash()
-
-    def _trace(self, pov_file=None, format_infos=None):
-        """
-        Symbolically trace the target program with the given input. A NonCrashingInput exception will be raised if the
-        target program does not crash with the given input.
-
-        :param pov_file:        CGC-specific setting.
-        :param format_infos:    CGC-specific setting.
-        :return:                None.
-        """
-
-        # faster place to check for non-crashing inputs
-        if self.is_cgc:
-            cgc_flag_page_magic = self._cgc_get_flag_page_magic()
-        else:
-            cgc_flag_page_magic = None
-
-        # transform input to channel and test_case
-        channel, test_case = self._prepare_channel(pov_file=pov_file)
-
-        # Prepare the initial state
-        if self.initial_state is None:
-            self.initial_state = self._create_initial_state(test_case, cgc_flag_page_magic=cgc_flag_page_magic)
-
-        # collect a concrete trace
-        # with trace_addr enabled, the trace collected starts with the basic block where trace_addr belongs
-        # which means the trace and the state may be inconsistent.
-        # But our tracer is smart enough to resolve the inconsistency
-        if not self.trace_result:
-            save_core = True
-            if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
-                save_core = False
-            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=save_core,
-                                     trace_bb_addr=self.trace_bb_addr, pre_fire_hook=self.pre_fire_hook)
-
-            if save_core:
-                # if a coredump is available, save a copy of all registers in the coredump for future references
-                if r.core_path and os.path.isfile(r.core_path):
-                    tiny_core = TinyCore(r.core_path)
-                    self.core_registers = tiny_core.registers
-                else:
-                    l.error("Cannot find core file (path: %s). Maybe the target process did not crash?",
-                            r.core_path)
-            self.trace_result = r
-
-        simgr = self.project.factory.simulation_manager(
-            self.initial_state,
-            save_unsat=False,
-            hierarchy=False,
-            save_unconstrained=self.trace_result.crashed
-        )
-
-        # trace symbolically!
-        # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
-        # there are no aslr slides
-        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=(not self.halfway_tracing))
-        simgr.use_technique(self._t)
-        simgr.use_technique(angr.exploration_techniques.Oppologist())
-        if self.is_cgc:
-            s = simgr.one_active
-            ChallRespInfo.prep_tracer(s, format_infos)
-            ZenPlugin.prep_tracer(s)
-        simgr.run()
-
-        # tracing completed
-        # if there was no crash we'll have to use the previous path's state
-        if 'crashed' in simgr.stashes:
-            # the state at crash time
-            self.state = simgr.crashed[0]
-            # a path leading up to the crashing basic block
-            self.prev = self._t.predecessors[-1]
-        else:
-            self.state = simgr.traced[0]
-            self.prev = self.state
-
-        zp = self.state.get_plugin('zen_plugin') if self.is_cgc else None
-        if 'crashed' not in simgr.stashes and zp is not None and len(zp.controlled_transmits) == 0:
-            l.warning("Input did not cause a crash.")
-            raise NonCrashingInput
-        l.debug("Done tracing input.")
-
-    def _cgc_get_flag_page_magic(self):
-        """
-        [CGC only] Get the magic content in flag page for CGC binaries.
-
-        :return:    The magic page content.
-        """
-
-        r = self.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash_input)
-        if not r.crashed:
-            if not self.tracer_bow.fire(save_core=True, testcase=self.crash_input, report_bad_args=True).crashed:
-                l.warning("input did not cause a crash")
-                raise NonCrashingInput
-        return r.magic_contents
 
     def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a
