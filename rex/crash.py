@@ -153,6 +153,9 @@ class BaseCrash:
         self.rop = rop
 
 class SimCrash(BaseCrash):
+    """
+    Advanced crash object handling symbolic states
+    """
     def __init__(self, crash_state=None, prev_state=None, checkpoint_path=None, hooks=None,
                  constrained_addrs=None, **kwargs):
         """
@@ -178,6 +181,7 @@ class SimCrash(BaseCrash):
         self.prev = None
         self.core_registers = None
         self._traced = None
+        self.crash_input = None
 
     def _initialize_project(self):
         assert self.project is not None
@@ -227,87 +231,6 @@ class SimCrash(BaseCrash):
         l.info("Preconstraining file stream %s upon the first read().", fstream)
         fstream.state.preconstrainer.preconstrain_file(self.crash_input, fstream, set_length=True)
 
-    def _create_initial_state(self, input_data, cgc_flag_page_magic=None):
-
-        # run the tracer, grabbing the crash state
-        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
-                          so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
-                          so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
-        add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
-                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
-
-        socket_queue = None
-        stdin_file = None  # the file that will be fd 0
-
-        if self.input_type == CrashInputType.TCP:
-            socket_queue = [ ]
-            for i in range(10):
-                # Initialize the first N socket pairs
-                input_sock = SimPreconstrainedFileStream(
-                    preconstraining_handler=self._preconstrain_file,
-                    name="aeg_tcp_in_%d" % i,
-                    ident='aeg_stdin_%d' % i
-                )
-                output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
-                socket_queue.append([input_sock, output_sock])
-        else:
-            stdin_file = SimPreconstrainedFileStream(
-                preconstraining_handler=self._preconstrain_file,
-                name='stdin',
-                ident='aeg_stdin'
-            )
-
-        # if we already have a core dump, use it to create the initial state
-        if self.trace_addr:
-            self.project.loader.main_object = self.elfcore_obj
-            initial_state = self.project.factory.blank_state(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options)
-            self.project.loader.main_object = self.project.loader.main_object._main_object
-            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
-            initial_state.fs.mount('/', SimArchrMount(self.target))
-        else:
-            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
-            initial_state = state_bow.fire(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options,
-            )
-
-        posix = SimSystemPosix(
-            stdin=stdin_file,
-            stdout=SimFileStream(name='stdout'),
-            stderr=SimFileStream(name='stderr'),
-            argc=initial_state.posix.argc,
-            argv=initial_state.posix.argv,
-            environ=initial_state.posix.environ,
-            auxv=initial_state.posix.auxv,
-            socket_queue=socket_queue,
-        )
-        # initialize other settings
-        initial_state.register_plugin('posix', posix)
-        initial_state.fs.mount('/proc', SimArchrProcMount(self.target))  # this has to happen after posix initializes
-
-        initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-        if self.is_cgc:
-            initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
-
-        # if we use halfway tracing, we need to reconstruct the sockets
-        # as a hack, we trigger the allocation of all sockets
-        # FIXME: this should be done properly, maybe let user to provide a hook
-        if self.halfway_tracing:
-            for i in range(3, 10):
-                initial_state.posix.open_socket(str(i))
-
-        # Loosen certain libc limits on symbolic input
-        initial_state.libc.buf_symbolic_bytes = 3000
-        initial_state.libc.max_symbolic_strchr = 3000
-        initial_state.libc.max_str_len = 3000
-        initial_state.libc.max_buffer_size = 16384
-
-        return initial_state
-
     ####### checkpoint related ########
     def restore_checkpoint(self, path):
         """
@@ -356,51 +279,118 @@ class SimCrash(BaseCrash):
         with open(path, "wb") as f:
             pickle.dump(s, f)
 
-class Crash(SimCrash):
+class CommCrash(SimCrash):
+    """
+    Even more advanced crash object handling target communication
+    """
+    def __init__(self, target, tracer_bow=None, input_type=CrashInputType.STDIN, port=None,
+                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None, **kwargs):
+        """
+        :param target:              archr Target that contains the binary that crashed.
+        :param tracer_bow:          The bow instance to use for tracing operations
+        :param input_type:          the way the program takes input, usually CrashInputType.STDIN
+        :param port:                In the case where the target takes TCP input, which port to connect to
+        :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
+        :param delay:               Some targets need time to initialize, use this argument to tell tracer wait for
+                                    several seconds before trying to set up connection
+        :param pre_fire_hook:       function hook that is executed after the target is launched before the input is sent
+                                    to the target
+        """
+        super().__init__(**kwargs)
+
+        self.target = target # type: archr.targets.Target
+        self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
+        self.input_type = input_type
+        self.target_port = port
+        self.delay = delay
+        self.pre_fire_hook = pre_fire_hook
+
+        self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
+        self.trace_bb_addr = None
+        self.halfway_tracing = bool(trace_addr)
+
+    def _create_project(self):
+        """
+        create an angr project through archr
+        """
+        self.binary = self.target.resolve_local_path(self.target.target_path)
+
+        # Initialize an angr Project
+
+        # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
+        # in the analyzer
+        dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
+        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
+
+        if not self.halfway_tracing:
+            self.project = self.angr_project_bow.fire()
+        else:
+            # to enable halfway-tracing, we need to generate a coredump at the wanted address first
+            # and use the core dump to create an angr project
+            channel, test_case = self._prepare_channel()
+            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
+                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay,
+                                     pre_fire_hook=self.pre_fire_hook)
+            self.trace_result = r
+            self._traced = True
+
+            l.debug("Loading the core dump @ %s into angr...", r.core_path)
+            self.project = self.angr_project_bow.fire(core_path=r.core_path)
+
+            self.elfcore_obj = self.project.loader.main_object
+            self.project.loader.main_object = self.project.loader.main_object._main_object
+
+    def _prepare_channel(self, pov_file=None):
+        """
+        translate pov_file or input to channel and test_case
+        """
+        # sanity check
+        if pov_file is None and self.crash_input is None:
+            raise ValueError("Must specify either crash or pov_file.")
+        if pov_file is not None and self.crash_input is not None:
+            raise ValueError("Cannot specify both a pov_file and a crash.")
+
+        # prepare channel and test_case
+        if pov_file is not None:
+            test_case = TracerPoV(pov_file)
+            channel = None
+        else:
+            input_data = self.crash_input
+            channel = self.input_type_to_channel_type(self.input_type)
+            if channel != "stdio":
+                channel += ":0"
+            test_case = input_data
+
+        return channel, test_case
+
+class Crash(CommCrash):
     """
     Triage and exploit a crash using angr.
     """
 
     def __init__(self, target, crash=None, pov_file=None, aslr=None,
-                 format_infos=None, tracer_bow=None,
-                 explore_steps=0,
-                 input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
-                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
+                 format_infos=None, explore_steps=0, use_crash_input=False,
                  **kwargs
                  ):
         """
-        :param target:              archr Target that contains the binary that crashed.
         :param crash:               String of input which crashed the binary.
         :param pov_file:            CGC PoV describing a crash.
         :param aslr:                Analyze the crash with aslr on or off.
         :param format_infos:        A list of atoi FormatInfo objects that should
                                     be used when analyzing the crash.
-        :param tracer_bow:          The bow instance to use for tracing operations
         :param explore_steps:       Number of steps which have already been explored, should
                                     only set by exploration methods.
-        :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
-        :param delay:               Some targets need time to initialize, use this argument to tell tracer wait for
-                                    several seconds before trying to set up connection
         """
-        super().__init__(**kwargs)
+        super().__init__(target, **kwargs)
 
-        self.target = target # type: archr.targets.Target
         self.use_crash_input = use_crash_input
-        self.input_type = input_type
-        self.target_port = port
         self.crash_input = crash
-        self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
-        self.delay = delay
-        self.pre_fire_hook = pre_fire_hook
 
         self.explore_steps = explore_steps
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
 
         self.angr_project_bow = None
-        self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
-        self.trace_bb_addr = None
-        self.halfway_tracing = bool(trace_addr)
         self._t = None
         self.trace_result = None
         self.added_actions = [ ]  # list of actions added during exploitation
@@ -647,6 +637,87 @@ class Crash(SimCrash):
 
         return filtered_control
 
+    def _create_initial_state(self, testcase, cgc_flag_page_magic=None):
+
+        # run the tracer, grabbing the crash state
+        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
+                          so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
+                          so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
+        add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
+                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
+        assert type(testcase) == bytes, "TracePov is no longer supported"
+
+        stdin_file = None
+        socket_queue = None
+        if self.input_type == CrashInputType.TCP:
+            socket_queue = [ ]
+            for i in range(10):
+                # Initialize the first N socket pairs
+                input_sock = SimPreconstrainedFileStream(
+                    preconstraining_handler=self._preconstrain_file,
+                    name="aeg_tcp_in_%d" % i,
+                    ident='aeg_stdin_%d' % i
+                )
+                output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
+                socket_queue.append([input_sock, output_sock])
+        else:
+            stdin_file = SimPreconstrainedFileStream(
+                preconstraining_handler=self._preconstrain_file,
+                name='stdin',
+                ident='aeg_stdin'
+            )
+
+        # if we already have a core dump, use it to create the initial state
+        if self.halfway_tracing:
+            self.project.loader.main_object = self.elfcore_obj
+            initial_state = self.project.factory.blank_state(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options)
+            self.project.loader.main_object = self.project.loader.main_object._main_object
+            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
+            initial_state.fs.mount('/', SimArchrMount(self.target))
+        else:
+            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
+            initial_state = state_bow.fire(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options,
+            )
+
+        posix = SimSystemPosix(
+            stdin=stdin_file,
+            stdout=SimFileStream(name='stdout'),
+            stderr=SimFileStream(name='stderr'),
+            argc=initial_state.posix.argc,
+            argv=initial_state.posix.argv,
+            environ=initial_state.posix.environ,
+            auxv=initial_state.posix.auxv,
+            socket_queue=socket_queue,
+        )
+        # initialize other settings
+        initial_state.register_plugin('posix', posix)
+        initial_state.fs.mount('/proc', SimArchrProcMount(self.target))  # this has to happen after posix initializes
+
+        initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+        if self.is_cgc:
+            initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
+
+        # if we use halfway tracing, we need to reconstruct the sockets
+        # as a hack, we trigger the allocation of all sockets
+        # FIXME: this should be done properly, maybe let user to provide a hook
+        if self.halfway_tracing:
+            for i in range(3, 10):
+                initial_state.posix.open_socket(str(i))
+
+        # Loosen certain libc limits on symbolic input
+        initial_state.libc.buf_symbolic_bytes = 3000
+        initial_state.libc.max_symbolic_strchr = 3000
+        initial_state.libc.max_str_len = 3000
+        initial_state.libc.max_buffer_size = 16384
+
+        return initial_state
+
     def copy(self):
         cp = Crash.__new__(Crash)
         cp.target = self.target
@@ -692,34 +763,8 @@ class Crash(SimCrash):
         :return:    None
         """
 
-        self.binary = self.target.resolve_local_path(self.target.target_path)
-
-        # Initialize an angr Project
-
-        # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
-        # in the analyzer
-        dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
-        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
-
-        if not self.halfway_tracing:
-            self.project = self.angr_project_bow.fire()
-        else:
-            # to enable halfway-tracing, we need to generate a coredump at the wanted address first
-            # and use the core dump to create an angr project
-            channel, test_case = self._prepare_channel()
-            r = self.tracer_bow.fire(testcase=test_case, channel=channel, save_core=True, record_trace=True,
-                                     trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=self.delay,
-                                     pre_fire_hook=self.pre_fire_hook)
-            self.trace_result = r
-            self._traced = True
-
-            l.debug("Loading the core dump @ %s into angr...", r.core_path)
-            self.project = self.angr_project_bow.fire(core_path=r.core_path)
-
-            self.elfcore_obj = self.project.loader.main_object
-            self.project.loader.main_object = self.project.loader.main_object._main_object
-
         # initialize angrop object
+        self._create_project()
         self._initialize_rop()
         self._initialize_project()
 
@@ -741,29 +786,6 @@ class Crash(SimCrash):
 
         l.info("Triaging the crash.")
         self._triage_crash()
-
-    def _prepare_channel(self, pov_file=None):
-        """
-        translate pov_file or input to channel and test_case
-        """
-        # sanity check
-        if pov_file is None and self.crash_input is None:
-            raise ValueError("Must specify either crash or pov_file.")
-        if pov_file is not None and self.crash_input is not None:
-            raise ValueError("Cannot specify both a pov_file and a crash.")
-
-        # prepare channel and test_case
-        if pov_file is not None:
-            test_case = TracerPoV(pov_file)
-            channel = None
-        else:
-            input_data = self.crash_input
-            channel = self.input_type_to_channel_type(self.input_type)
-            if channel != "stdio":
-                channel += ":0"
-            test_case = input_data
-
-        return channel, test_case
 
     def _trace(self, pov_file=None, format_infos=None):
         """
