@@ -31,10 +31,10 @@ class NonCrashingInput(Exception):
 
 class BaseCrash:
     """
-    Some basic functionalities: handles angrop and facilitate exploit generation
+    Some basic functionalities: handles angrop
     """
 
-    def __init__(self, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None, rop_cache_tuple=None, **kwargs):
+    def __init__(self, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None, rop_cache_tuple=None):
         """
         :param use_rop:             Whether or not to use rop.
         :param fast_mode:           whether to use fast_mode in angrop
@@ -44,76 +44,12 @@ class BaseCrash:
         """
         self.binary = None
         self.project = None
-        self.crash_types = [ ]  # crash type
         self.rop = angrop_object
 
         self._use_rop = use_rop
         self._rop_fast_mode = fast_mode
         self._rop_cache_tuple = rop_cache_tuple
         self._rop_cache_path = rop_cache_path
-
-    def one_of(self, crash_types):
-        """
-        Test if a self's crash has one of the vulnerabilities described in crash_types
-        """
-
-        if not isinstance(crash_types, (list, tuple)):
-            crash_types = [crash_types]
-
-        return bool(len(set(self.crash_types).intersection(set(crash_types))))
-
-    def exploitable(self):
-        """
-        Determine if the crash is exploitable.
-
-        :return: True if the crash's type is generally considered exploitable, False otherwise
-        """
-
-        exploitables = [Vulnerability.IP_OVERWRITE, Vulnerability.PARTIAL_IP_OVERWRITE, Vulnerability.BP_OVERWRITE,
-                Vulnerability.PARTIAL_BP_OVERWRITE, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
-
-        return self.one_of(exploitables)
-
-    def explorable(self):
-        """
-        Determine if the crash can be explored with the 'crash explorer'.
-
-        :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
-        """
-
-        # TODO add arbitrary receive into this list
-        explorables = [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
-
-        return self.one_of(explorables)
-
-    def leakable(self):
-        """
-        Determine if the crash can potentially cause an information leak using the point-to-flag technique.
-
-        :return: True if the 'point-to-flag' technique can be applied to this crash
-        """
-
-        return self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT])
-
-    @property
-    def is_cgc(self):
-        """
-        Are we working on a CGC binary?
-        """
-        if self.project.loader.main_object.os == 'cgc':
-            return True
-        elif self.project.loader.main_object.os.startswith('UNIX'):
-            return False
-        else:
-            raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
-
-    @property
-    def is_linux(self):
-        """
-        Are we working on a Linux binary?
-        """
-
-        return self.project.loader.main_object.os.startswith('UNIX')
 
     def _initialize_rop(self):
         """
@@ -174,6 +110,7 @@ class SimCrash(BaseCrash):
         self._prev_state = prev_state
         self._checkpoint_path = checkpoint_path
 
+        self.project = None
         self.hooks = {} if hooks is None else hooks
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.initial_state = None
@@ -182,6 +119,7 @@ class SimCrash(BaseCrash):
         self.core_registers = None
         self._traced = None
         self.crash_input = None
+        self.added_actions = [ ]  # list of actions added during exploitation
 
     def _initialize_project(self):
         assert self.project is not None
@@ -230,6 +168,26 @@ class SimCrash(BaseCrash):
 
         l.info("Preconstraining file stream %s upon the first read().", fstream)
         fstream.state.preconstrainer.preconstrain_file(self.crash_input, fstream, set_length=True)
+
+    @property
+    def is_cgc(self):
+        """
+        Are we working on a CGC binary?
+        """
+        if self.project.loader.main_object.os == 'cgc':
+            return True
+        elif self.project.loader.main_object.os.startswith('UNIX'):
+            return False
+        else:
+            raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
+
+    @property
+    def is_linux(self):
+        """
+        Are we working on a Linux binary?
+        """
+
+        return self.project.loader.main_object.os.startswith('UNIX')
 
     ####### checkpoint related ########
     def restore_checkpoint(self, path):
@@ -281,7 +239,7 @@ class SimCrash(BaseCrash):
 
 class CommCrash(SimCrash):
     """
-    Even more advanced crash object handling target communication
+    Even more advanced crash object handling target communication and tracing
     """
     def __init__(self, target, tracer_bow=None, input_type=CrashInputType.STDIN, port=None,
                  trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None, **kwargs):
@@ -298,23 +256,28 @@ class CommCrash(SimCrash):
         """
         super().__init__(**kwargs)
 
+        # communication related
         self.target = target # type: archr.targets.Target
         self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
         self.input_type = input_type
         self.target_port = port
         self.delay = delay
         self.pre_fire_hook = pre_fire_hook
+        self.angr_project_bow = None
+        self.binary = self.target.resolve_local_path(self.target.target_path)
 
+        # tracing related
         self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
         self.trace_bb_addr = None
         self.halfway_tracing = bool(trace_addr)
+        self._t = None
+        self.trace_result = None
+        self.elfcore_obj = None # this is for the main_object swap hack
 
     def _create_project(self):
         """
         create an angr project through archr
         """
-        self.binary = self.target.resolve_local_path(self.target.target_path)
-
         # Initialize an angr Project
 
         # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
@@ -363,9 +326,105 @@ class CommCrash(SimCrash):
 
         return channel, test_case
 
+    @staticmethod
+    def input_type_to_channel_type(input_type):
+        if input_type == CrashInputType.STDIN:
+            return "stdio"
+        elif input_type == CrashInputType.TCP:
+            return 'tcp'
+        elif input_type == CrashInputType.TCP6:
+            return 'tcp6'
+        elif input_type == CrashInputType.UDP:
+            return 'udp'
+        elif input_type == CrashInputType.UDP6:
+            return 'udp6'
+        raise NotImplementedError("Unsupported input type %s." % input_type)
+
+    def _create_initial_state(self, testcase, cgc_flag_page_magic=None):
+
+        # run the tracer, grabbing the crash state
+        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
+                          so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
+                          so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
+        add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
+                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
+        assert type(testcase) == bytes, "TracePov is no longer supported"
+
+        stdin_file = None
+        socket_queue = None
+        if self.input_type == CrashInputType.TCP:
+            socket_queue = [ ]
+            for i in range(10):
+                # Initialize the first N socket pairs
+                input_sock = SimPreconstrainedFileStream(
+                    preconstraining_handler=self._preconstrain_file,
+                    name="aeg_tcp_in_%d" % i,
+                    ident='aeg_stdin_%d' % i
+                )
+                output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
+                socket_queue.append([input_sock, output_sock])
+        else:
+            stdin_file = SimPreconstrainedFileStream(
+                preconstraining_handler=self._preconstrain_file,
+                name='stdin',
+                ident='aeg_stdin'
+            )
+
+        # if we already have a core dump, use it to create the initial state
+        if self.halfway_tracing:
+            self.project.loader.main_object = self.elfcore_obj
+            initial_state = self.project.factory.blank_state(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options)
+            self.project.loader.main_object = self.project.loader.main_object._main_object
+            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
+            initial_state.fs.mount('/', SimArchrMount(self.target))
+        else:
+            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
+            initial_state = state_bow.fire(
+                mode='tracing',
+                add_options=add_options,
+                remove_options=remove_options,
+            )
+
+        posix = SimSystemPosix(
+            stdin=stdin_file,
+            stdout=SimFileStream(name='stdout'),
+            stderr=SimFileStream(name='stderr'),
+            argc=initial_state.posix.argc,
+            argv=initial_state.posix.argv,
+            environ=initial_state.posix.environ,
+            auxv=initial_state.posix.auxv,
+            socket_queue=socket_queue,
+        )
+        # initialize other settings
+        initial_state.register_plugin('posix', posix)
+        initial_state.fs.mount('/proc', SimArchrProcMount(self.target))  # this has to happen after posix initializes
+
+        initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
+        if self.is_cgc:
+            initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
+
+        # if we use halfway tracing, we need to reconstruct the sockets
+        # as a hack, we trigger the allocation of all sockets
+        # FIXME: this should be done properly, maybe let user to provide a hook
+        if self.halfway_tracing:
+            for i in range(3, 10):
+                initial_state.posix.open_socket(str(i))
+
+        # Loosen certain libc limits on symbolic input
+        initial_state.libc.buf_symbolic_bytes = 3000
+        initial_state.libc.max_symbolic_strchr = 3000
+        initial_state.libc.max_str_len = 3000
+        initial_state.libc.max_buffer_size = 16384
+
+        return initial_state
+
 class Crash(CommCrash):
     """
     Triage and exploit a crash using angr.
+    The highest level crash object, perform analysis on the crash state.
     """
 
     def __init__(self, target, crash=None, pov_file=None, aslr=None,
@@ -380,21 +439,18 @@ class Crash(CommCrash):
                                     be used when analyzing the crash.
         :param explore_steps:       Number of steps which have already been explored, should
                                     only set by exploration methods.
+        :param use_crash_input:     if a byte is not constrained by the generated exploits,
+                                    use the original crash input to fill the byte.
         """
         super().__init__(target, **kwargs)
 
         self.use_crash_input = use_crash_input
         self.crash_input = crash
+        self.crash_types = [ ]  # crash type
 
         self.explore_steps = explore_steps
         if self.explore_steps > 10:
             raise CannotExploit("Too many steps taken during crash exploration")
-
-        self.angr_project_bow = None
-        self._t = None
-        self.trace_result = None
-        self.added_actions = [ ]  # list of actions added during exploitation
-        self.elfcore_obj = None # this is for the main_object swap hack
 
         self.symbolic_mem = None
         self.flag_mem = None
@@ -414,6 +470,49 @@ class Crash(CommCrash):
     #
     # Public methods
     #
+
+    def one_of(self, crash_types):
+        """
+        Test if a self's crash has one of the vulnerabilities described in crash_types
+        """
+
+        if not isinstance(crash_types, (list, tuple)):
+            crash_types = [crash_types]
+
+        return bool(len(set(self.crash_types).intersection(set(crash_types))))
+
+    def exploitable(self):
+        """
+        Determine if the crash is exploitable.
+
+        :return: True if the crash's type is generally considered exploitable, False otherwise
+        """
+
+        exploitables = [Vulnerability.IP_OVERWRITE, Vulnerability.PARTIAL_IP_OVERWRITE, Vulnerability.BP_OVERWRITE,
+                Vulnerability.PARTIAL_BP_OVERWRITE, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
+
+        return self.one_of(exploitables)
+
+    def explorable(self):
+        """
+        Determine if the crash can be explored with the 'crash explorer'.
+
+        :return: True if the crash's type lends itself to exploring, only 'arbitrary-read' for now
+        """
+
+        # TODO add arbitrary receive into this list
+        explorables = [Vulnerability.ARBITRARY_READ, Vulnerability.WRITE_WHAT_WHERE, Vulnerability.WRITE_X_WHERE]
+
+        return self.one_of(explorables)
+
+    def leakable(self):
+        """
+        Determine if the crash can potentially cause an information leak using the point-to-flag technique.
+
+        :return: True if the 'point-to-flag' technique can be applied to this crash
+        """
+
+        return self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT])
 
 
     def _prepare_exploit_factory(self, blacklist_symbolic_explore=True, **kwargs):
@@ -637,87 +736,6 @@ class Crash(CommCrash):
 
         return filtered_control
 
-    def _create_initial_state(self, testcase, cgc_flag_page_magic=None):
-
-        # run the tracer, grabbing the crash state
-        remove_options = {so.TRACK_REGISTER_ACTIONS, so.TRACK_TMP_ACTIONS, so.TRACK_JMP_ACTIONS,
-                          so.ACTION_DEPS, so.TRACK_CONSTRAINT_ACTIONS, so.LAZY_SOLVES, so.SIMPLIFY_MEMORY_WRITES,
-                          so.ALL_FILES_EXIST, so.UNICORN, so.CPUID_SYMBOLIC}
-        add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRETIZE_SYMBOLIC_WRITE_SIZES,
-                       so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
-        assert type(testcase) == bytes, "TracePov is no longer supported"
-
-        stdin_file = None
-        socket_queue = None
-        if self.input_type == CrashInputType.TCP:
-            socket_queue = [ ]
-            for i in range(10):
-                # Initialize the first N socket pairs
-                input_sock = SimPreconstrainedFileStream(
-                    preconstraining_handler=self._preconstrain_file,
-                    name="aeg_tcp_in_%d" % i,
-                    ident='aeg_stdin_%d' % i
-                )
-                output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
-                socket_queue.append([input_sock, output_sock])
-        else:
-            stdin_file = SimPreconstrainedFileStream(
-                preconstraining_handler=self._preconstrain_file,
-                name='stdin',
-                ident='aeg_stdin'
-            )
-
-        # if we already have a core dump, use it to create the initial state
-        if self.halfway_tracing:
-            self.project.loader.main_object = self.elfcore_obj
-            initial_state = self.project.factory.blank_state(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options)
-            self.project.loader.main_object = self.project.loader.main_object._main_object
-            self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
-            initial_state.fs.mount('/', SimArchrMount(self.target))
-        else:
-            state_bow = archr.arsenal.angrStateBow(self.target, self.angr_project_bow)
-            initial_state = state_bow.fire(
-                mode='tracing',
-                add_options=add_options,
-                remove_options=remove_options,
-            )
-
-        posix = SimSystemPosix(
-            stdin=stdin_file,
-            stdout=SimFileStream(name='stdout'),
-            stderr=SimFileStream(name='stderr'),
-            argc=initial_state.posix.argc,
-            argv=initial_state.posix.argv,
-            environ=initial_state.posix.environ,
-            auxv=initial_state.posix.auxv,
-            socket_queue=socket_queue,
-        )
-        # initialize other settings
-        initial_state.register_plugin('posix', posix)
-        initial_state.fs.mount('/proc', SimArchrProcMount(self.target))  # this has to happen after posix initializes
-
-        initial_state.register_plugin('preconstrainer', SimStatePreconstrainer(self.constrained_addrs))
-        if self.is_cgc:
-            initial_state.preconstrainer.preconstrain_flag_page(cgc_flag_page_magic)
-
-        # if we use halfway tracing, we need to reconstruct the sockets
-        # as a hack, we trigger the allocation of all sockets
-        # FIXME: this should be done properly, maybe let user to provide a hook
-        if self.halfway_tracing:
-            for i in range(3, 10):
-                initial_state.posix.open_socket(str(i))
-
-        # Loosen certain libc limits on symbolic input
-        initial_state.libc.buf_symbolic_bytes = 3000
-        initial_state.libc.max_symbolic_strchr = 3000
-        initial_state.libc.max_str_len = 3000
-        initial_state.libc.max_buffer_size = 16384
-
-        return initial_state
-
     def copy(self):
         cp = Crash.__new__(Crash)
         cp.target = self.target
@@ -763,7 +781,6 @@ class Crash(CommCrash):
         :return:    None
         """
 
-        # initialize angrop object
         self._create_project()
         self._initialize_rop()
         self._initialize_project()
@@ -1260,17 +1277,3 @@ class Crash(CommCrash):
         segments[current_w_start] = current_w_end - current_w_start
 
         return segments
-
-    @staticmethod
-    def input_type_to_channel_type(input_type):
-        if input_type == CrashInputType.STDIN:
-            return "stdio"
-        elif input_type == CrashInputType.TCP:
-            return 'tcp'
-        elif input_type == CrashInputType.TCP6:
-            return 'tcp6'
-        elif input_type == CrashInputType.UDP:
-            return 'udp'
-        elif input_type == CrashInputType.UDP6:
-            return 'udp6'
-        raise NotImplementedError("Unsupported input type %s." % input_type)
