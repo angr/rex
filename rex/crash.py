@@ -29,113 +29,38 @@ l = logging.getLogger("rex.Crash")
 class NonCrashingInput(Exception):
     pass
 
-
-class Crash:
+class BaseCrash:
     """
-    Triage and exploit a crash using angr.
+    Some basic functionalities: handles angrop and facilitate exploit generation
     """
 
-    def __init__(self, target, crash=None, pov_file=None, aslr=None, constrained_addrs=None,
-                 hooks=None, format_infos=None, tracer_bow=None,
-                 explore_steps=0,
-                 input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
-                 checkpoint_path=None, crash_state=None, prev_state=None,
-                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
-                 #
-                 # angrop-related settings
-                 #
-                 rop_cache_tuple=None, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None,
-                 ):
+    def __init__(self, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None, rop_cache_tuple=None, **kwargs):
         """
-        :param target:              archr Target that contains the binary that crashed.
-        :param crash:               String of input which crashed the binary.
-        :param pov_file:            CGC PoV describing a crash.
-        :param aslr:                Analyze the crash with aslr on or off.
-        :param constrained_addrs:   List of addrs which have been constrained
-                                    during exploration.
-        :param hooks:               Dictionary of simprocedure hooks, addresses
-                                    to simprocedures.
-        :param format_infos:        A list of atoi FormatInfo objects that should
-                                    be used when analyzing the crash.
-        :param tracer_bow:          The bow instance to use for tracing operations
-        :param explore_steps:       Number of steps which have already been explored, should
-                                    only set by exploration methods.
-        :param checkpoint_path:     Path to a checkpoint file that provides initial_state, prev_state, crash_state, and
-                                    so on.
-        :param crash_state:         An already traced crash state.
-        :param prev_state:          The predecessor of the final crash state.
-        :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
-        :param delay:               Some targets need time to initialize, use this argument to tell tracer wait for
-                                    several seconds before trying to set up connection
-
-        angrop-related settings:
-        :param rop_cache_tuple:     A angrop tuple to load from.
         :param use_rop:             Whether or not to use rop.
-        :param angrop_object:       An angrop object, should only be set by exploration methods.
+        :param fast_mode:           whether to use fast_mode in angrop
+        :param angrop_object:       whether to directly load existing angrop_object
+        :param rop_cache_path:      path of pickled angrop gadget cache
+        :param rop_cache_tuple:     A angrop tuple to load from.
         """
-
-        self.target = target # type: archr.targets.Target
-        self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
-        self.hooks = {} if hooks is None else hooks
-        self.use_crash_input = use_crash_input
-        self.input_type = input_type
-        self.target_port = port
-        self.crash = crash
-        self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
-        self.delay = delay
-        self.pre_fire_hook = pre_fire_hook
-
-        self.explore_steps = explore_steps
-        if self.explore_steps > 10:
-            raise CannotExploit("Too many steps taken during crash exploration")
+        self.binary = None
+        self.project = None
+        self.crash_types = [ ]  # crash type
+        self.rop = angrop_object
 
         self._use_rop = use_rop
         self._rop_fast_mode = fast_mode
         self._rop_cache_tuple = rop_cache_tuple
+        self._rop_cache_path = rop_cache_path
 
-        self.angr_project_bow = None
-        self.project = None
-        self.binary = None
-        self.rop = None
-        self.initial_state = None
-        self.state = None
-        self.prev = None
-        self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
-        self.trace_bb_addr = None
-        self.halfway_tracing = bool(trace_addr)
-        self._t = None
-        self._traced = None
-        self.trace_result = None
-        self.added_actions = [ ]  # list of actions added during exploitation
-        self.elfcore_obj = None # this is for the main_object swap hack
+    def one_of(self, crash_types):
+        """
+        Test if a self's crash has one of the vulnerabilities described in crash_types
+        """
 
-        self.symbolic_mem = None
-        self.flag_mem = None
-        self.crash_types = [ ]  # crash type
-        self.violating_action = None  # action (in case of a bad write or read) which caused the crash
-        self.core_registers = None
-        self._preconstraining_input_data = None
+        if not isinstance(crash_types, (list, tuple)):
+            crash_types = [crash_types]
 
-        # Initialize
-        self._initialize(angrop_object, rop_cache_path, checkpoint_path, crash_state, prev_state)
-
-        # ASLR-related stuff
-        if aslr is None:
-            if self.is_cgc:
-                # cgc has no ASLR, but we don't assume a stackbase
-                self.aslr = False
-            else:
-                # We assume Linux is going to enforce stack-based ASLR
-                self.aslr = True
-        else:
-            self.aslr = aslr
-
-        # Work
-        self._work(pov_file, format_infos)
-
-    #
-    # Public methods
-    #
+        return bool(len(set(self.crash_types).intersection(set(crash_types))))
 
     def exploitable(self):
         """
@@ -169,6 +94,236 @@ class Crash:
         """
 
         return self.one_of([Vulnerability.ARBITRARY_READ, Vulnerability.ARBITRARY_TRANSMIT])
+
+    @property
+    def is_cgc(self):
+        """
+        Are we working on a CGC binary?
+        """
+        if self.project.loader.main_object.os == 'cgc':
+            return True
+        elif self.project.loader.main_object.os.startswith('UNIX'):
+            return False
+        else:
+            raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
+
+    @property
+    def is_linux(self):
+        """
+        Are we working on a Linux binary?
+        """
+
+        return self.project.loader.main_object.os.startswith('UNIX')
+
+    def _initialize_rop(self):
+        """
+        Use angrop to generate ROP gadgets and such.
+
+        :return:    An angr.analyses.ROP instance.
+        """
+        # sanity check
+        if self.rop:
+            return
+        if not self._use_rop:
+            self.rop = None
+            return
+
+        # always have a cache path
+        if not self._rop_cache_path:
+            # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
+            # hash binary contents for rop cache name
+            binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
+            self._rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
+
+        # finally, create an angrop object
+        rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode)
+        if self._rop_cache_tuple is not None:
+            l.info("Loading rop gadgets from cache tuple...")
+            rop._load_cache_tuple(self._rop_cache_tuple)
+        elif os.path.exists(self._rop_cache_path):
+            l.info("Loading rop gadgets from cache file %s...", self._rop_cache_path)
+            rop.load_gadgets(self._rop_cache_path)
+        else:
+            l.info("Collecting ROP gadgets... don't panic if you see tons of error messages!")
+            if angr.misc.testing.is_testing:
+                rop.find_gadgets_single_threaded(show_progress=False)
+            else:
+                rop.find_gadgets(show_progress=False)
+            rop.save_gadgets(self._rop_cache_path)
+        self.rop = rop
+
+class SimCrash(BaseCrash):
+    def __init__(self, crash_state=None, prev_state=None, checkpoint_path=None, hooks=None, **kwargs):
+        """
+        :param crash_state:         An already traced crash state.
+        :param prev_state:          The predecessor of the final crash state.
+        :param checkpoint_path:     Path to a checkpoint file that provides initial_state, prev_state, crash_state, and
+                                    so on.
+        :param hooks:               Dictionary of simprocedure hooks, addresses
+                                    to simprocedures.
+        """
+        super().__init__(**kwargs)
+
+        self._crash_state = crash_state
+        self._prev_state = prev_state
+        self._checkpoint_path = checkpoint_path
+
+        self.hooks = {} if hooks is None else hooks
+        self.initial_state = None
+        self.state = None
+        self.prev = None
+        self.core_registers = None
+        self._traced = None
+
+    def _initialize_project(self):
+        assert self.project is not None
+
+        if self.is_cgc:
+            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
+
+        # Load cached/intermediate states
+        if self._crash_state is not None and self._prev_state is not None:
+            self.state = self._crash_state
+            self.prev = self._prev_state
+            self._traced = True
+        elif self._checkpoint_path is not None:
+            l.info("Loading checkpoint file at %#s.", self._checkpoint_path)
+            self.restore_checkpoint(self._checkpoint_path)
+            self._traced = True
+        else:
+            self.state = None
+            self.prev = None
+            self.initial_state = None
+            self._traced = False
+
+        # Add custom hooks
+        for addr, proc in self.hooks.items():
+            self.project.hook(addr, proc)
+            l.debug("Hooking %#x -> %s...", addr, proc.display_name)
+
+
+    ####### checkpoint related ########
+    def restore_checkpoint(self, path):
+        """
+        Restore from a checkpoint file.
+
+        :param str path:    Path to the file which saves intermediate states.
+        :return:            None
+        """
+        with open(path, "rb") as f:
+            try:
+                s = pickle.load(f)
+            except EOFError as ex:
+                raise EOFError("Fail to restore from checkpoint %s" % path) from ex
+
+        keys = {'initial_state',
+                'crash_state',
+                'prev_state',
+                'core_registers',
+                }
+
+        if not isinstance(s, dict):
+            raise TypeError("The checkpoint file has an incorrect format.")
+
+        for k in keys:
+            if k not in s:
+                raise KeyError("Key %s is not found in the checkpoint file." % k)
+
+        self.initial_state = s['initial_state']
+        self.state = s['crash_state']
+        self.prev = s['prev_state']
+        self.core_registers = s['core_registers']
+
+    def save_checkpoint(self, path):
+        """
+        Save intermediate results (traced states, etc.) to a file to allow faster exploit generation in the future.
+
+        :param str path:    Path to the file which saves intermediate states.
+        :return:            None
+        """
+        s = {
+            'initial_state': self.initial_state,
+            'crash_state': self.state,
+            'prev_state': self.prev,
+            'core_registers': self.core_registers,
+        }
+        with open(path, "wb") as f:
+            pickle.dump(s, f)
+
+
+class Crash(SimCrash):
+    """
+    Triage and exploit a crash using angr.
+    """
+
+    def __init__(self, target, crash=None, pov_file=None, aslr=None, constrained_addrs=None,
+                 format_infos=None, tracer_bow=None,
+                 explore_steps=0,
+                 input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
+                 trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
+                 **kwargs
+                 ):
+        """
+        :param target:              archr Target that contains the binary that crashed.
+        :param crash:               String of input which crashed the binary.
+        :param pov_file:            CGC PoV describing a crash.
+        :param aslr:                Analyze the crash with aslr on or off.
+        :param constrained_addrs:   List of addrs which have been constrained
+                                    during exploration.
+        :param format_infos:        A list of atoi FormatInfo objects that should
+                                    be used when analyzing the crash.
+        :param tracer_bow:          The bow instance to use for tracing operations
+        :param explore_steps:       Number of steps which have already been explored, should
+                                    only set by exploration methods.
+        :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
+        :param delay:               Some targets need time to initialize, use this argument to tell tracer wait for
+                                    several seconds before trying to set up connection
+        """
+        super().__init__(**kwargs)
+
+        self.target = target # type: archr.targets.Target
+        self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
+        self.use_crash_input = use_crash_input
+        self.input_type = input_type
+        self.target_port = port
+        self.crash = crash
+        self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
+        self.delay = delay
+        self.pre_fire_hook = pre_fire_hook
+
+        self.explore_steps = explore_steps
+        if self.explore_steps > 10:
+            raise CannotExploit("Too many steps taken during crash exploration")
+
+        self.angr_project_bow = None
+        self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
+        self.trace_bb_addr = None
+        self.halfway_tracing = bool(trace_addr)
+        self._t = None
+        self.trace_result = None
+        self.added_actions = [ ]  # list of actions added during exploitation
+        self.elfcore_obj = None # this is for the main_object swap hack
+
+        self.symbolic_mem = None
+        self.flag_mem = None
+        self.violating_action = None  # action (in case of a bad write or read) which caused the crash
+        self._preconstraining_input_data = None
+
+        # by default, we assume non-cgc OS has ASLR on
+        self.aslr = aslr
+        if aslr is None:
+            self.aslr = not self.is_cgc
+
+        # Initialize
+        self._initialize()
+
+        # Work
+        self._work(pov_file, format_infos)
+
+    #
+    # Public methods
+    #
+
 
     def _prepare_exploit_factory(self, blacklist_symbolic_explore=True, **kwargs):
         # crash should have been classified at this point
@@ -429,93 +584,11 @@ class Crash:
 
         return cp
 
-    def checkpoint(self, path):
-        """
-        Save intermediate results (traced states, etc.) to a file to allow faster exploit generation in the future.
-
-        :param str path:    Path to the file which saves intermediate states.
-        :return:            None
-        """
-        if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
-            return
-        s = {
-            'initial_state': self.initial_state,
-            'crash_state': self.state,
-            'prev_state': self.prev,
-            'core_registers': self.core_registers,
-        }
-        with open(path, "wb") as f:
-            pickle.dump(s, f)
-
-    def checkpoint_restore(self, path):
-        """
-        Restore from a checkpoint file.
-
-        :param str path:    Path to the file which saves intermediate states.
-        :return:            None
-        """
-        if isinstance(self.tracer_bow, archr.arsenal.RRTracerBow):
-            return
-
-        with open(path, "rb") as f:
-            try:
-                s = pickle.load(f)
-            except EOFError as ex:
-                raise EOFError("Fail to restore from checkpoint %s" % path) from ex
-
-        keys = {'initial_state',
-                'crash_state',
-                'prev_state',
-                'core_registers',
-                }
-
-        if not isinstance(s, dict):
-            raise TypeError("The checkpoint file has an incorrect format.")
-
-        for k in keys:
-            if k not in s:
-                raise KeyError("Key %s is not found in the checkpoint file." % k)
-
-        self.initial_state = s['initial_state']
-        self.state = s['crash_state']
-        self.prev = s['prev_state']
-        self.core_registers = s['core_registers']
-
-    @property
-    def is_cgc(self):
-        """
-        Are we working on a CGC binary?
-        """
-        if self.project.loader.main_object.os == 'cgc':
-            return True
-        elif self.project.loader.main_object.os.startswith('UNIX'):
-            return False
-        else:
-            raise ValueError("Can't analyze binary for OS %s" % self.project.loader.main_object.os)
-
-    @property
-    def is_linux(self):
-        """
-        Are we working on a Linux binary?
-        """
-
-        return self.project.loader.main_object.os.startswith('UNIX')
-
-    def one_of(self, crash_types):
-        """
-        Test if a self's crash has one of the vulnerabilities described in crash_types
-        """
-
-        if not isinstance(crash_types, (list, tuple)):
-            crash_types = [crash_types]
-
-        return bool(len(set(self.crash_types).intersection(set(crash_types))))
-
     #
     # Private methods
     #
 
-    def _initialize(self, rop_obj, rop_cache_path, checkpoint_path, crash_state, prev_state):
+    def _initialize(self):
         """
         Initialization steps.
         - Create a new angr project.
@@ -552,44 +625,10 @@ class Crash:
             self.elfcore_obj = self.project.loader.main_object
             self.project.loader.main_object = self.project.loader.main_object._main_object
 
-        # Add custom hooks
-        for addr, proc in self.hooks.items():
-            self.project.hook(addr, proc)
-            l.debug("Hooking %#x -> %s...", addr, proc.display_name)
+        # initialize angrop object
+        self._initialize_rop()
+        self._initialize_project()
 
-        # ROP-related stuff
-        if self._use_rop:
-            if rop_obj is not None:
-                self.rop = rop_obj
-            else:
-                if not rop_cache_path:
-                    # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
-                    # hash binary contents for rop cache name
-                    binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
-                    rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
-                l.debug("Initializing angrop...")
-                self.rop = self._initialize_rop(fast_mode=self._rop_fast_mode, rop_cache_tuple=self._rop_cache_tuple,
-                                                rop_cache_path=rop_cache_path)
-        else:
-            self.rop = None
-
-        if self.project.loader.main_object.os == 'cgc':
-            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
-
-        # Load cached/intermediate states
-        if crash_state is not None and prev_state is not None:
-            self.state = crash_state
-            self.prev = prev_state
-            self._traced = True
-        elif checkpoint_path is not None:
-            l.info("Loading checkpoint file at %#s.", checkpoint_path)
-            self.checkpoint_restore(checkpoint_path)
-            self._traced = True
-        else:
-            self.state = None
-            self.prev = None
-            self.initial_state = None
-            self._traced = False
 
     def _work(self, pov_file, format_infos):
         """
@@ -1073,29 +1112,6 @@ class Crash:
                 sbits += 1
 
         return sbits
-
-    def _initialize_rop(self, fast_mode=False, rop_cache_tuple=None, rop_cache_path=None):
-        """
-        Use angrop to generate ROP gadgets and such.
-
-        :return:    An angr.analyses.ROP instance.
-        """
-
-        rop = self.project.analyses.ROP(fast_mode=fast_mode)
-        if rop_cache_tuple is not None:
-            l.info("Loading rop gadgets from cache tuple...")
-            rop._load_cache_tuple(rop_cache_tuple)
-        elif os.path.exists(rop_cache_path):
-            l.info("Loading rop gadgets from cache file %s...", rop_cache_path)
-            rop.load_gadgets(rop_cache_path)
-        else:
-            l.info("Collecting ROP gadgets... don't panic if you see tons of error messages!")
-            if angr.misc.testing.is_testing:
-                rop.find_gadgets_single_threaded(show_progress=False)
-            else:
-                rop.find_gadgets(show_progress=False)
-            rop.save_gadgets(rop_cache_path)
-        return rop
 
     #
     # Static methods
