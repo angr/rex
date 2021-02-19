@@ -153,7 +153,8 @@ class BaseCrash:
         self.rop = rop
 
 class SimCrash(BaseCrash):
-    def __init__(self, crash_state=None, prev_state=None, checkpoint_path=None, hooks=None, **kwargs):
+    def __init__(self, crash_state=None, prev_state=None, checkpoint_path=None, hooks=None,
+                 constrained_addrs=None, **kwargs):
         """
         :param crash_state:         An already traced crash state.
         :param prev_state:          The predecessor of the final crash state.
@@ -161,6 +162,8 @@ class SimCrash(BaseCrash):
                                     so on.
         :param hooks:               Dictionary of simprocedure hooks, addresses
                                     to simprocedures.
+        :param constrained_addrs:   List of addrs which have been constrained
+                                    during exploration.
         """
         super().__init__(**kwargs)
 
@@ -169,6 +172,7 @@ class SimCrash(BaseCrash):
         self._checkpoint_path = checkpoint_path
 
         self.hooks = {} if hooks is None else hooks
+        self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.initial_state = None
         self.state = None
         self.prev = None
@@ -211,6 +215,18 @@ class SimCrash(BaseCrash):
             open_fds = { }
         return open_fds
 
+    def _preconstrain_file(self, fstream):
+        """
+        Use preconstrainer to preconstrain an input file to the specified input data upon the first read on the stream.
+
+        :param fstream: The file stream where the read happens.
+        :return:        None
+        """
+
+
+        l.info("Preconstraining file stream %s upon the first read().", fstream)
+        fstream.state.preconstrainer.preconstrain_file(self.crash_input, fstream, set_length=True)
+
     def _create_initial_state(self, input_data, cgc_flag_page_magic=None):
 
         # run the tracer, grabbing the crash state
@@ -240,7 +256,6 @@ class SimCrash(BaseCrash):
                 name='stdin',
                 ident='aeg_stdin'
             )
-        self._preconstraining_input_data = input_data
 
         # if we already have a core dump, use it to create the initial state
         if self.trace_addr:
@@ -346,7 +361,7 @@ class Crash(SimCrash):
     Triage and exploit a crash using angr.
     """
 
-    def __init__(self, target, crash=None, pov_file=None, aslr=None, constrained_addrs=None,
+    def __init__(self, target, crash=None, pov_file=None, aslr=None,
                  format_infos=None, tracer_bow=None,
                  explore_steps=0,
                  input_type=CrashInputType.STDIN, port=None, use_crash_input=False,
@@ -358,8 +373,6 @@ class Crash(SimCrash):
         :param crash:               String of input which crashed the binary.
         :param pov_file:            CGC PoV describing a crash.
         :param aslr:                Analyze the crash with aslr on or off.
-        :param constrained_addrs:   List of addrs which have been constrained
-                                    during exploration.
         :param format_infos:        A list of atoi FormatInfo objects that should
                                     be used when analyzing the crash.
         :param tracer_bow:          The bow instance to use for tracing operations
@@ -372,11 +385,10 @@ class Crash(SimCrash):
         super().__init__(**kwargs)
 
         self.target = target # type: archr.targets.Target
-        self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.use_crash_input = use_crash_input
         self.input_type = input_type
         self.target_port = port
-        self.crash = crash
+        self.crash_input = crash
         self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
         self.delay = delay
         self.pre_fire_hook = pre_fire_hook
@@ -397,7 +409,6 @@ class Crash(SimCrash):
         self.symbolic_mem = None
         self.flag_mem = None
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
-        self._preconstraining_input_data = None
 
         # Initialize
         self._initialize()
@@ -646,7 +657,7 @@ class Crash(SimCrash):
         cp.trace_bb_addr = self.trace_bb_addr
         cp.elfcore_obj = self.elfcore_obj
         cp.delay = self.delay
-        cp.crash = self.crash
+        cp.crash_input = self.crash_input
         cp.input_type = self.input_type
         cp.project = self.project
         cp.aslr = self.aslr
@@ -721,8 +732,6 @@ class Crash(SimCrash):
         """
 
         if not self._traced:
-            # Begin tracing!
-            self._preconstraining_input_data = None
             self._trace(pov_file=pov_file,
                         format_infos=format_infos,
                         )
@@ -738,9 +747,9 @@ class Crash(SimCrash):
         translate pov_file or input to channel and test_case
         """
         # sanity check
-        if pov_file is None and self.crash is None:
+        if pov_file is None and self.crash_input is None:
             raise ValueError("Must specify either crash or pov_file.")
-        if pov_file is not None and self.crash is not None:
+        if pov_file is not None and self.crash_input is not None:
             raise ValueError("Cannot specify both a pov_file and a crash.")
 
         # prepare channel and test_case
@@ -748,7 +757,7 @@ class Crash(SimCrash):
             test_case = TracerPoV(pov_file)
             channel = None
         else:
-            input_data = self.crash
+            input_data = self.crash_input
             channel = self.input_type_to_channel_type(self.input_type)
             if channel != "stdio":
                 channel += ":0"
@@ -836,18 +845,6 @@ class Crash(SimCrash):
             raise NonCrashingInput
         l.debug("Done tracing input.")
 
-    def _preconstrain_file(self, fstream):
-        """
-        Use preconstrainer to preconstrain an input file to the specified input data upon the first read on the stream.
-
-        :param fstream: The file stream where the read happens.
-        :return:        None
-        """
-
-
-        l.info("Preconstraining file stream %s upon the first read().", fstream)
-        fstream.state.preconstrainer.preconstrain_file(self._preconstraining_input_data, fstream, set_length=True)
-
     def _cgc_get_flag_page_magic(self):
         """
         [CGC only] Get the magic content in flag page for CGC binaries.
@@ -855,9 +852,9 @@ class Crash(SimCrash):
         :return:    The magic page content.
         """
 
-        r = self.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash)
+        r = self.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash_input)
         if not r.crashed:
-            if not self.tracer_bow.fire(save_core=True, testcase=self.crash, report_bad_args=True).crashed:
+            if not self.tracer_bow.fire(save_core=True, testcase=self.crash_input, report_bad_args=True).crashed:
                 l.warning("input did not cause a crash")
                 raise NonCrashingInput
         return r.magic_contents
