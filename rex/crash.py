@@ -127,7 +127,7 @@ class BaseCrash:
         project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
         libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
         # FIXME: stop hardcoding dude...
-        libc_rop.set_badbytes = [0x00]
+        libc_rop.set_badbytes([0x00])
         if os.path.exists(libc_rop_cache_path):
             l.info("Loading libc rop gadgets from cache file %s...", libc_rop_cache_path)
             libc_rop.load_gadgets(libc_rop_cache_path)
