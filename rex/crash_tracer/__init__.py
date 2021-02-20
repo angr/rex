@@ -8,8 +8,14 @@ import archr
 from tracer import TinyCore
 from angr import sim_options as so
 from archr.analyzers.angr_state import SimArchrMount
+from angr.storage.file import SimFileDescriptorDuplex
+
+from ..enums import CrashInputType
 
 l = logging.getLogger("rex.CrashTracer")
+
+class CrashTracerError(Exception):
+    pass
 
 class TraceMode:
     DUMB            =   "dumb"
@@ -56,7 +62,7 @@ class CrashTracer:
     @abstractmethod
     def _bootstrap_state(self, state, **kwargs):
         """
-        create an initial angr state for later symbolic tracing
+        modify the initial angr state for later symbolic tracing
         """
         raise NotImplementedError()
 
@@ -66,6 +72,10 @@ class CrashTracer:
         if not self.angr_project_bow:
             dsb = archr.arsenal.DataScoutBow(target, analyzer=self.tracer_bow)
             self.angr_project_bow = archr.arsenal.angrProjectBow(target, dsb)
+
+    @staticmethod
+    def _channel_to_input_type(channel):
+        return channel.split(":")[0]
 
 class SimTracer(CrashTracer):
     def __init__(self, **kwargs):
@@ -158,6 +168,8 @@ class DumbTracer(CrashTracer):
         self.trace_result = None
         self.elfcore_obj = None
         self.crash_addr = None
+        self.testcase = None
+        self.channel = None
 
     def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0):
         """
@@ -176,6 +188,8 @@ class DumbTracer(CrashTracer):
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay,
                                  trace_bb_addr=(self.crash_addr, 1), crash_addr=(self.crash_addr, 1), pre_fire_hook=pre_fire_hook, record_trace=True)
         self.trace_result = r
+        self.testcase = testcase
+        self.channel = channel
 
         # if a coredump is available, save a copy of all registers in the coredump for future references
         assert r.core_path and os.path.isfile(r.core_path)
@@ -203,4 +217,56 @@ class DumbTracer(CrashTracer):
         return initial_state
 
     def _bootstrap_state(self, state, **kwargs):
+        """
+        perform analysis to input-state correspondence and then add the constraints in the state
+        """
+        word_size = self.project.arch.bytes
+        marker_size = word_size * 3 # the minimal amount of gadgets to be useful
+
+        # we operate on concrete memory so far, so it is safe to load and eval concrete memory
+        data = state.solver.eval(state.memory.load(state.regs.sp, 0x100), cast_to=bytes)
+
+        # identify marker from the original input on stack
+        for i in range(0, len(data), marker_size):
+            marker = data[i:i+marker_size]
+            if marker in self.testcase:
+                break
+        else:
+            raise CrashTracerError("Fail to identify marker from the original input")
+        controlled_addr = state.regs.sp + i
+        marker_idx = self.testcase.index(marker)
+        assert self.testcase.count(marker) == 1, "The input should have high entropy, cyclic is recommended"
+
+        # search for the max length of the controlled data
+        data = state.solver.eval(state.memory.load(controlled_addr, 0x200), cast_to=bytes)
+        assert data[:marker_size] == self.testcase[marker_idx:marker_idx+marker_size]
+        for max_len in range(marker_size, len(data), word_size):
+            if data[:max_len] != self.testcase[marker_idx:marker_idx+max_len]:
+                max_len -= word_size
+                break
+
+        # only support network input at the moment
+        input_type = self._channel_to_input_type(self.channel)
+        assert input_type != CrashInputType.STDIN, "input from stdin is not supported by dumb tracer right now"
+
+        # open a fake socket and look for it
+        state.posix.open_socket(str(i))
+        for fd in state.posix.fd:
+            if fd in [0, 1, 2]:
+                continue
+            simfd = state.posix.fd[fd]
+            if not isinstance(simfd, SimFileDescriptorDuplex):
+                continue
+            if simfd.read_storage.ident.startswith("aeg_stdin"):
+                break
+        else:
+            raise CrashTracerError("Fail to find the input socket")
+
+        # replace concrete input with symbolic input for the socket
+        sim_chunk = simfd.read_storage.load(marker_idx, max_len)
+        state.memory.store(controlled_addr, sim_chunk)
+
+        # FIXME: do not allow null byte
+        #for i in range(max_len):
+        #    state.solver.add(sim_chunk.get_byte(i) != 0)
         return state
