@@ -276,7 +276,6 @@ class CommCrash(SimCrash):
         self._t = None
         self._traced = None
         self.trace_result = None
-        self.elfcore_obj = None # this is for the main_object swap hack
 
         # cgc related
         self.pov_file = pov_file
@@ -308,8 +307,7 @@ class CommCrash(SimCrash):
             l.debug("Loading the core dump @ %s into angr...", r.core_path)
             self.project = self.angr_project_bow.fire(core_path=r.core_path)
 
-            self.elfcore_obj = self.project.loader.main_object
-            self.project.loader.main_object = self.project.loader.main_object._main_object
+            self.project.loader.main_object = self.project.loader.elfcore_object._main_object
 
     def _create_initial_state(self, testcase, cgc_flag_page_magic=None):
 
@@ -343,12 +341,12 @@ class CommCrash(SimCrash):
 
         # if we already have a core dump, use it to create the initial state
         if self.halfway_tracing:
-            self.project.loader.main_object = self.elfcore_obj
+            self.project.loader.main_object = self.project.loader.elfcore_object
             initial_state = self.project.factory.blank_state(
                 mode='tracing',
                 add_options=add_options,
                 remove_options=remove_options)
-            self.project.loader.main_object = self.project.loader.main_object._main_object
+            self.project.loader.main_object = self.project.loader.elfcore_object._main_object
             self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
             initial_state.fs.mount('/', SimArchrMount(self.target))
         else:
@@ -839,7 +837,6 @@ class Crash(CommCrash):
         cp.binary = self.binary
         cp.trace_addr = self.trace_addr
         cp.trace_bb_addr = self.trace_bb_addr
-        cp.elfcore_obj = self.elfcore_obj
         cp.delay = self.delay
         cp.crash_input = self.crash_input
         cp.input_type = self.input_type
