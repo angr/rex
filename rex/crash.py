@@ -92,15 +92,13 @@ class SimCrash(BaseCrash):
     """
     Advanced crash object handling symbolic states
     """
-    def __init__(self, crash_state=None, prev_state=None, checkpoint_path=None, hooks=None,
+    def __init__(self, crash_state=None, prev_state=None, checkpoint_path=None,
                  constrained_addrs=None, **kwargs):
         """
         :param crash_state:         An already traced crash state.
         :param prev_state:          The predecessor of the final crash state.
         :param checkpoint_path:     Path to a checkpoint file that provides initial_state, prev_state, crash_state, and
                                     so on.
-        :param hooks:               Dictionary of simprocedure hooks, addresses
-                                    to simprocedures.
         :param constrained_addrs:   List of addrs which have been constrained
                                     during exploration.
         """
@@ -111,7 +109,6 @@ class SimCrash(BaseCrash):
         self._checkpoint_path = checkpoint_path
 
         self.project = None
-        self.hooks = {} if hooks is None else hooks
         self.constrained_addrs = [ ] if constrained_addrs is None else constrained_addrs
         self.initial_state = None
         self.state = None
@@ -140,11 +137,6 @@ class SimCrash(BaseCrash):
             self.prev = None
             self.initial_state = None
             self._traced = False
-
-        # Add custom hooks
-        for addr, proc in self.hooks.items():
-            self.project.hook(addr, proc)
-            l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
     def get_sim_open_fds(self):
         try:
@@ -240,12 +232,13 @@ class CommCrash(SimCrash):
     """
     Even more advanced crash object handling target communication and tracing
     """
-    def __init__(self, target, tracer_bow=None, input_type=CrashInputType.STDIN, port=None,
+    def __init__(self, target, tracer_bow=None, angr_project_bow=None, input_type=CrashInputType.STDIN, port=None,
                  trace_addr : Union[int, Tuple[int, int]]=None, delay=0, pre_fire_hook=None,
                  pov_file=None, format_infos=None, **kwargs):
         """
         :param target:              archr Target that contains the binary that crashed.
         :param tracer_bow:          The bow instance to use for tracing operations
+        :param angr_project_bow:    The project bow to use, can be used for custom hooks and syscalls
         :param input_type:          the way the program takes input, usually CrashInputType.STDIN
         :param port:                In the case where the target takes TCP input, which port to connect to
         :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
@@ -266,7 +259,7 @@ class CommCrash(SimCrash):
         self.target_port = port
         self.delay = delay
         self.pre_fire_hook = pre_fire_hook
-        self.angr_project_bow = None
+        self.angr_project_bow = angr_project_bow
         self.binary = self.target.resolve_local_path(self.target.target_path)
 
         # tracing related
@@ -289,8 +282,10 @@ class CommCrash(SimCrash):
 
         # pass tracer_bow to datascoutanalyzer to make addresses in angr consistent with those
         # in the analyzer
-        dsb = archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
-        self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, dsb)
+        if self.angr_project_bow is None:
+            # for core files we don't want/need a datascout analyzer
+            scout = None if self.halfway_tracing else archr.arsenal.DataScoutBow(self.target, analyzer=self.tracer_bow)
+            self.angr_project_bow = archr.arsenal.angrProjectBow(self.target, scout_analyzer=scout)
 
         if not self.halfway_tracing:
             self.project = self.angr_project_bow.fire()
