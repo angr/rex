@@ -1,4 +1,5 @@
 import os
+import re
 import angr
 import random
 import hashlib
@@ -33,7 +34,8 @@ class BaseCrash:
     Some basic functionalities: handles angrop
     """
 
-    def __init__(self, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None, rop_cache_tuple=None):
+    def __init__(self, use_rop=True, fast_mode=True, angrop_object=None, rop_cache_path=None,
+                 rop_cache_tuple=None):
         """
         :param use_rop:             Whether or not to use rop.
         :param fast_mode:           whether to use fast_mode in angrop
@@ -41,18 +43,26 @@ class BaseCrash:
         :param rop_cache_path:      path of pickled angrop gadget cache
         :param rop_cache_tuple:     A angrop tuple to load from.
         """
-        self.binary = None
         self.project = None
+        self.tracer = None
+        self.binary = None
+        self.libc_binary = None
         self.rop = angrop_object
+        self.libc_rop = None
 
         self._use_rop = use_rop
         self._rop_fast_mode = fast_mode
         self._rop_cache_tuple = rop_cache_tuple
         self._rop_cache_path = rop_cache_path
 
+    def _get_cache_path(self, binary):
+        # hash binary contents for rop cache name
+        binhash = hashlib.md5(open(binary, 'rb').read()).hexdigest()
+        return os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(binary), binhash))
+
     def initialize_rop(self):
         """
-        Use angrop to generate ROP gadgets and such.
+        Use angrop to generate ROP gadgets and such for the target binary.
 
         :return:    An angr.analyses.ROP instance.
         """
@@ -66,9 +76,7 @@ class BaseCrash:
         # always have a cache path
         if not self._rop_cache_path:
             # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
-            # hash binary contents for rop cache name
-            binhash = hashlib.md5(open(self.binary, 'rb').read()).hexdigest()
-            self._rop_cache_path = os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(self.binary), binhash))
+            self._rop_cache_path = self._get_cache_path(self.binary)
 
         # finally, create an angrop object
         rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode)
@@ -86,6 +94,48 @@ class BaseCrash:
                 rop.find_gadgets(show_progress=False)
             rop.save_gadgets(self._rop_cache_path)
         self.rop = rop
+
+    def _identify_libc(self):
+        mapping = self.tracer.angr_project_bow._mem_mapping
+        lib_folder = self.tracer.angr_project_bow._lib_folder
+        lib_names = [ x for x in mapping.keys() if re.match(r"^(libuC)?libc(\.|-)", os.path.basename(x)) ]
+        if not len(lib_names):
+            return None
+        if len(lib_names) > 1:
+            l.warning("more than 1 potential libc detected: %s", lib_names)
+
+        return mapping[lib_names[0]], os.path.join(lib_folder, os.path.basename(lib_names[0]))
+
+    def initialize_libc_rop(self):
+        # sanity check
+        if self.libc_rop:
+            return
+        if not self._use_rop:
+            self.libc_rop = None
+            return
+
+        base_addr, self.libc_binary = self._identify_libc()
+        if not self.libc_binary:
+            return
+
+        # always have a cache path
+        libc_rop_cache_path = self._get_cache_path(self.binary)
+
+        # finally, create an angrop object
+        bin_opts = {"base_addr": base_addr}
+        project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
+        libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode)
+        if os.path.exists(libc_rop_cache_path):
+            l.info("Loading libc rop gadgets from cache file %s...", libc_rop_cache_path)
+            libc_rop.load_gadgets(libc_rop_cache_path)
+        else:
+            l.info("Collecting ROP gadgets in libc... don't panic if you see tons of error messages!")
+            if angr.misc.testing.is_testing:
+                libc_rop.find_gadgets_single_threaded(show_progress=False)
+            else:
+                libc_rop.find_gadgets(show_progress=False)
+            libc_rop.save_gadgets(libc_rop_cache_path)
+        self.libc_rop = libc_rop
 
 class SimCrash(BaseCrash):
     """
@@ -787,6 +837,7 @@ class Crash(CommCrash):
         cp.state = self.state.copy()
         cp.initial_state = self.initial_state
         cp.rop = self.rop
+        cp.libc_rop = self.libc_rop
         cp.added_actions = list(self.added_actions)
         cp.symbolic_mem = self.symbolic_mem.copy()
         cp.flag_mem = self.flag_mem.copy()
@@ -816,8 +867,9 @@ class Crash(CommCrash):
 
         self.concrete_trace()
         self.create_project()
-        self.initialize_rop()
         self.initialize_project()
+        self.initialize_rop()
+        self.initialize_libc_rop()
 
     def _work(self):
         """
