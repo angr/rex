@@ -249,8 +249,8 @@ class DumbTracer(CrashTracer):
         input_type = self._channel_to_input_type(self.channel)
         assert input_type != CrashInputType.STDIN, "input from stdin is not supported by dumb tracer right now"
 
-        # open a fake socket and look for it
-        state.posix.open_socket(str(i))
+        # open a fake socket, look for it and fake reading from it
+        state.posix.open_socket(3)
         for fd in state.posix.fd:
             if fd in [0, 1, 2]:
                 continue
@@ -261,12 +261,14 @@ class DumbTracer(CrashTracer):
                 break
         else:
             raise CrashTracerError("Fail to find the input socket")
+        simfd.read_data(len(self.testcase))
 
         # replace concrete input with symbolic input for the socket
         sim_chunk = simfd.read_storage.load(marker_idx, max_len)
         state.memory.store(controlled_addr, sim_chunk)
 
-        # FIXME: do not allow null byte
-        #for i in range(max_len):
-        #    state.solver.add(sim_chunk.get_byte(i) != 0)
+        # do not allow null byte
+        # FIXME: should perform some value analysis just in case null byte is allowed
+        for i in range(max_len):
+            state.solver.add(sim_chunk.get_byte(i) != 0)
         return state
