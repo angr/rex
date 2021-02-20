@@ -73,7 +73,7 @@ class SimTracer(CrashTracer):
 
     def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0):
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True,
-                                 pre_fire_hook=pre_fire_hook)
+                                 pre_fire_hook=pre_fire_hook, delay=delay)
 
         # if a coredump is available, save a copy of all registers in the coredump for future references
         assert r.core_path and os.path.isfile(r.core_path)
@@ -150,15 +150,31 @@ class HalfwayTracer(CrashTracer):
 class DumbTracer(CrashTracer):
     """
     automatically identify accept library call and then generate coredump from here
+    FIXME: assumption: the target can be fired multiple times with the same behavior
+    FIXME: assumption: the trace is not insanely long. But in reality, it can be.
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.trace_result = None
         self.elfcore_obj = None
+        self.crash_addr = None
+
+    def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0):
+        """
+        run the target once to identify crash_addr
+        """
+        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=False, delay=delay,
+                                 pre_fire_hook=pre_fire_hook, record_trace=True)
+        return r.trace[-1]
 
     def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0):
-        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True,
-                                 pre_fire_hook=pre_fire_hook, record_trace=False)
+        """
+        """
+        self.crash_addr = self._identify_crash_addr(testcase, channel, pre_fire_hook, delay=delay)
+        l.info("DumbTracer identify the crash_addr @ %#x", self.crash_addr)
+
+        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay,
+                                 trace_bb_addr=(self.crash_addr, 1), crash_addr=(self.crash_addr, 1), pre_fire_hook=pre_fire_hook, record_trace=True)
         self.trace_result = r
 
         # if a coredump is available, save a copy of all registers in the coredump for future references
