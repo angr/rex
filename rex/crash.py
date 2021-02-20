@@ -80,7 +80,7 @@ class BaseCrash:
             self._rop_cache_path = self._get_cache_path(self.binary)
 
         # finally, create an angrop object
-        rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode)
+        rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
         if self._rop_cache_tuple is not None:
             l.info("Loading rop gadgets from cache tuple...")
             rop._load_cache_tuple(self._rop_cache_tuple)
@@ -125,7 +125,7 @@ class BaseCrash:
         # finally, create an angrop object
         bin_opts = {"base_addr": base_addr}
         project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
-        libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode)
+        libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
         # FIXME: stop hardcoding dude...
         libc_rop.set_badbytes = [0x00]
         if os.path.exists(libc_rop_cache_path):
