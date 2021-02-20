@@ -34,11 +34,12 @@ class BaseCrash:
     Some basic functionalities: handles angrop
     """
 
-    def __init__(self, use_rop=True, fast_mode=True, angrop_object=None, rop_cache_path=None,
+    def __init__(self, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None,
                  rop_cache_tuple=None):
         """
         :param use_rop:             Whether or not to use rop.
-        :param fast_mode:           whether to use fast_mode in angrop
+        :param fast_mode:           whether to use fast_mode in angrop, fast_mode can generate
+                                    no gadgets some times
         :param angrop_object:       whether to directly load existing angrop_object
         :param rop_cache_path:      path of pickled angrop gadget cache
         :param rop_cache_tuple:     A angrop tuple to load from.
@@ -100,7 +101,7 @@ class BaseCrash:
         lib_folder = self.tracer.angr_project_bow._lib_folder
         lib_names = [ x for x in mapping.keys() if re.match(r"^(libuC)?libc(\.|-)", os.path.basename(x)) ]
         if not len(lib_names):
-            return None
+            return None, None
         if len(lib_names) > 1:
             l.warning("more than 1 potential libc detected: %s", lib_names)
 
@@ -119,12 +120,14 @@ class BaseCrash:
             return
 
         # always have a cache path
-        libc_rop_cache_path = self._get_cache_path(self.binary)
+        libc_rop_cache_path = self._get_cache_path(self.libc_binary)
 
         # finally, create an angrop object
         bin_opts = {"base_addr": base_addr}
         project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
         libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode)
+        # FIXME: stop hardcoding dude...
+        libc_rop.set_badbytes = [0x00]
         if os.path.exists(libc_rop_cache_path):
             l.info("Loading libc rop gadgets from cache file %s...", libc_rop_cache_path)
             libc_rop.load_gadgets(libc_rop_cache_path)
