@@ -344,6 +344,8 @@ class CommCrash(SimCrash):
         """
         collect a concrete trace
         """
+        self.tracer.tracer_bow.pickup_env()
+
         # transform input to channel and test_case
         channel, testcase = self._prepare_channel()
         self.trace_result, self.core_registers = self.tracer._concrete_trace(testcase, channel, self.pre_fire_hook, self.delay)

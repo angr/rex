@@ -177,6 +177,8 @@ class DumbTracer(CrashTracer):
         """
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=False, delay=delay,
                                  pre_fire_hook=pre_fire_hook, record_trace=True)
+        if not r.crashed:
+            raise CrashTracerError("The target is not crashed inside QEMU!")
         return r.trace[-1]
 
     def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0):
