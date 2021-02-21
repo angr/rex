@@ -267,8 +267,9 @@ class DumbTracer(CrashTracer):
         sim_chunk = simfd.read_storage.load(marker_idx, max_len)
         state.memory.store(controlled_addr, sim_chunk)
 
-        # do not allow null byte
+        # do not allow null byte and blank
         # FIXME: should perform some value analysis just in case null byte is allowed
         for i in range(max_len):
             state.solver.add(sim_chunk.get_byte(i) != 0)
+            state.solver.add(sim_chunk.get_byte(i) != 0x20)
         return state
