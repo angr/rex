@@ -572,6 +572,9 @@ class Crash(CommCrash):
         # Work
         self._work()
 
+        self.initialize_rop()
+        self.initialize_libc_rop()
+
     #
     # Public methods
     #
@@ -886,8 +889,6 @@ class Crash(CommCrash):
         self.concrete_trace()
         self.create_project()
         self.initialize_project()
-        self.initialize_rop()
-        self.initialize_libc_rop()
 
     def _work(self):
         """
