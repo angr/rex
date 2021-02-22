@@ -239,6 +239,7 @@ def test_linux_stacksmash_32():
 
         _check_arsenal_has_send(exploit.arsenal)
 
+
 def test_linux_network_stacksmash_64():
     # Test exploiting a simple network server with a stack-based buffer overflow.
     inp = b'\x00' * 500
