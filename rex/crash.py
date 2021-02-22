@@ -49,6 +49,7 @@ class BaseCrash:
         self._use_rop = use_rop
         self._rop_fast_mode = fast_mode
         self._rop_cache_path = rop_cache_path
+        self._rop_cache = None
 
     def initialize_rop(self):
         """
@@ -63,16 +64,11 @@ class BaseCrash:
             self.rop = None
             return
 
-        # always have a cache path
-        if not self._rop_cache_path:
-            # we search for ROP gadgets now to avoid the memory exhaustion bug in pypy
-            self._rop_cache_path = self._get_cache_path(self.binary)
-
         # finally, create an angrop object
         rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
-        if os.path.exists(self._rop_cache_path):
-            l.info("Loading rop gadgets from cache file %s...", self._rop_cache_path)
-            rop.load_gadgets(self._rop_cache_path)
+        if self._rop_cache:
+            l.info("Loading rop gadgets from cache")
+            rop._load_cache_tuple(self._rop_cache[0])
         else:
             l.info("Collecting ROP gadgets... don't panic if you see tons of error messages!")
             l.info("It may take several minutes to finish...")
@@ -80,7 +76,6 @@ class BaseCrash:
                 rop.find_gadgets_single_threaded(show_progress=False)
             else:
                 rop.find_gadgets(show_progress=False)
-            rop.save_gadgets(self._rop_cache_path)
         self.rop = rop
 
     def _identify_libc(self):
@@ -106,18 +101,15 @@ class BaseCrash:
         if not self.libc_binary:
             return
 
-        # always have a cache path
-        libc_rop_cache_path = self._get_cache_path(self.libc_binary)
-
         # finally, create an angrop object
         bin_opts = {"base_addr": base_addr}
         project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
         libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
         # FIXME: stop hardcoding dude...
         libc_rop.set_badbytes([0x00, 0x20])
-        if os.path.exists(libc_rop_cache_path):
-            l.info("Loading libc rop gadgets from cache file %s...", libc_rop_cache_path)
-            libc_rop.load_gadgets(libc_rop_cache_path)
+        if self._rop_cache:
+            l.info("Loading libc rop gadgets from cache")
+            libc_rop._load_cache_tuple(self._rop_cache[1])
         else:
             l.info("Collecting ROP gadgets in libc... don't panic if you see tons of error messages!")
             l.info("It may take several minutes to finish...")
@@ -125,8 +117,27 @@ class BaseCrash:
                 libc_rop.find_gadgets_single_threaded(show_progress=False)
             else:
                 libc_rop.find_gadgets(show_progress=False)
-            libc_rop.save_gadgets(libc_rop_cache_path)
         self.libc_rop = libc_rop
+
+    def soft_load_cache(self):
+        if not self._rop_cache_path:
+            self._rop_cache_path = self._get_cache_path(self.binary)
+        if not os.path.exists(self._rop_cache_path):
+            return
+        with open(self._rop_cache_path, "rb") as f:
+            self._rop_cache = pickle.load(f)
+
+    def soft_save_cache(self):
+        if not self._rop_cache_path:
+            self._rop_cache_path = self._get_cache_path(self.binary)
+        # do not overwrite existing cache
+        if os.path.exists(self._rop_cache_path):
+            return
+        rop_cache_tuple = self.rop._get_cache_tuple()
+        libc_rop_cache_tuple = self.rop._get_cache_tuple()
+        rop_cache = (rop_cache_tuple, libc_rop_cache_tuple)
+        with open(self._rop_cache_path, "wb") as f:
+            pickle.dump(rop_cache, f)
 
     @staticmethod
     def _get_cache_path(binary):
@@ -364,7 +375,6 @@ class CommCrash(SimCrash):
         if self.tracer._is_cgc:
             self.tracer.cgc_flag_page_magic = self.trace_result.magic_contents
 
-
     def symbolic_trace(self):
         """
         Symbolically trace the target program with the given input. A NonCrashingInput exception will be raised if the
@@ -558,8 +568,11 @@ class Crash(CommCrash):
         # Work
         self._work()
 
+        # rop related initialization
+        self.soft_load_cache()
         self.initialize_rop()
         self.initialize_libc_rop()
+        self.soft_save_cache()
 
     #
     # Public methods
