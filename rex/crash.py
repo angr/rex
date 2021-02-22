@@ -280,12 +280,13 @@ class CommCrash(SimCrash):
     """
     Even more advanced crash object handling target communication and tracing
     """
-    def __init__(self, target, trace_mode=TraceMode.FULL_SYMBOLIC, tracer_opts=None, tracer_bow=None, angr_project_bow=None,
+    def __init__(self, target, crash=None, trace_mode=TraceMode.FULL_SYMBOLIC, tracer_opts=None, tracer_bow=None, angr_project_bow=None,
                  input_type=CrashInputType.STDIN, port=None,
                  delay=0, pre_fire_hook=None, angr_project_bow=None
                  pov_file=None, format_infos=None, **kwargs):
         """
         :param target:              archr Target that contains the binary that crashed.
+        :param crash:               String of input which crashed the binary.
         :param trace_mode           the tracer to use. Currently supports "dumb", "halfway" and "full_symbolic"
         :param tracer_opts          specify options for tracer, see CrashTracer
         :param tracer_bow:          (deprecated)The bow instance to use for tracing operations
@@ -297,11 +298,23 @@ class CommCrash(SimCrash):
                                     several seconds before trying to set up connection
         :param pre_fire_hook:       function hook that is executed after the target is launched before the input is sent
                                     to the target
+        :param actions:             the actions to interact with the target, if specified, crash or pov_file will be ignored
+                                    during interaction with the target
         :param pov_file:            CGC PoV describing a crash.
         :param format_infos:        A list of atoi FormatInfo objects that should
                                     be used when analyzing the crash.
         """
         super().__init__(**kwargs)
+
+        # sanity check
+        # TODO: support other tracers
+        if trace_mode != TraceMode.DUMB and actions:
+            raise NotImplementedError("actions only support dumb tracer at the moment")
+
+        # input related
+        self.actions = actions
+        self.crash_input = crash
+        self.pov_file = pov_file
 
         # communication related
         self.target = target # type: archr.targets.Target
@@ -337,7 +350,6 @@ class CommCrash(SimCrash):
         self.trace_result = None
 
         # cgc related
-        self.pov_file = pov_file
         self.format_infos = format_infos
 
     def concrete_trace(self):
@@ -348,7 +360,10 @@ class CommCrash(SimCrash):
 
         # transform input to channel and test_case
         channel, testcase = self._prepare_channel()
-        self.trace_result, self.core_registers = self.tracer._concrete_trace(testcase, channel, self.pre_fire_hook, self.delay)
+        self.trace_result, self.core_registers = self.tracer._concrete_trace(testcase, channel,
+                                                                             self.pre_fire_hook,
+                                                                             delay=self.delay,
+                                                                             actions=self.actions)
 
     def symbolic_trace(self):
         """
@@ -414,7 +429,7 @@ class CommCrash(SimCrash):
 
     def _create_initial_state(self, testcase, cgc_flag_page_magic=None):
 
-        assert type(testcase) == bytes, "TracePov is no longer supported"
+        assert type(testcase) in (bytes, tuple, list), "TracePov is no longer supported"
 
         stdin_file = None
         socket_queue = None
@@ -483,9 +498,7 @@ class CommCrash(SimCrash):
             channel = None
         else:
             input_data = self.crash_input
-            channel = self._input_type_to_channel_type(self.input_type)
-            if channel != "stdio":
-                channel += ":0"
+            channel = self.input_type_to_channel(self.input_type)
             test_case = input_data
         self._channel = channel
         self._test_case = test_case
@@ -504,6 +517,13 @@ class CommCrash(SimCrash):
                 l.warning("input did not cause a crash")
                 raise NonCrashingInput
         return r.magic_contents
+
+    @staticmethod
+    def input_type_to_channel(input_type):
+        channel = Crash._input_type_to_channel_type(input_type)
+        if channel != "stdio":
+            channel += ":0"
+        return channel
 
     @staticmethod
     def _input_type_to_channel_type(input_type):
@@ -525,11 +545,8 @@ class Crash(CommCrash):
     The highest level crash object, perform analysis on the crash state.
     """
 
-    def __init__(self, target, crash=None, pov_file=None, aslr=None,
-                 use_crash_input=False, explore_steps=0, **kwargs):
+    def __init__(self, target, aslr=None, use_crash_input=False, explore_steps=0, **kwargs):
         """
-        :param crash:               String of input which crashed the binary.
-        :param pov_file:            CGC PoV describing a crash.
         :param aslr:                Analyze the crash with aslr on or off.
         :param use_crash_input:     if a byte is not constrained by the generated exploits,
                                     use the original crash input to fill the byte.
@@ -537,7 +554,6 @@ class Crash(CommCrash):
         super().__init__(target, **kwargs)
 
         self.use_crash_input = use_crash_input
-        self.crash_input = crash
         self.crash_types = [ ]  # crash type
 
         self.explore_steps = explore_steps
@@ -853,6 +869,7 @@ class Crash(CommCrash):
         cp.explore_steps = self.explore_steps
         cp.constrained_addrs = list(self.constrained_addrs)
         cp.core_registers = self.core_registers.copy() if self.core_registers is not None else None
+        cp.actions = self.actions
 
         return cp
 

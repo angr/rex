@@ -39,7 +39,7 @@ class CrashTracer:
         self.project = None
 
     @abstractmethod
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0):
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         """
         generate a concrete trace and maybe core dump
         """
@@ -81,9 +81,9 @@ class SimTracer(CrashTracer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0):
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True,
-                                 pre_fire_hook=pre_fire_hook, delay=delay)
+                                 pre_fire_hook=pre_fire_hook, delay=delay, actions=actions)
 
         # if a coredump is available, save a copy of all registers in the coredump for future references
         assert r.core_path and os.path.isfile(r.core_path)
@@ -115,12 +115,12 @@ class HalfwayTracer(CrashTracer):
         self.trace_result = None
         self.elfcore_obj = None # this is for the main_object swap hack
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0):
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         # to enable halfway-tracing, we need to generate a coredump at the wanted address first
         # and use the core dump to create an angr project
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, record_trace=True,
                                  trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=delay,
-                                 pre_fire_hook=pre_fire_hook)
+                                 pre_fire_hook=pre_fire_hook, actions=actions)
 
         # if a coredump is available, save a copy of all registers in the coredump for future references
         assert r.core_path and os.path.isfile(r.core_path)
@@ -171,24 +171,26 @@ class DumbTracer(CrashTracer):
         self.testcase = None
         self.channel = None
 
-    def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0):
+    def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         """
         run the target once to identify crash_addr
         """
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=False, delay=delay,
-                                 pre_fire_hook=pre_fire_hook, record_trace=True)
+                                 pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions)
         if not r.crashed:
             raise CrashTracerError("The target is not crashed inside QEMU!")
         return r.trace[-1]
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0):
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         """
         """
-        self.crash_addr = self._identify_crash_addr(testcase, channel, pre_fire_hook, delay=delay)
-        l.info("DumbTracer identify the crash_addr @ %#x", self.crash_addr)
+        self.crash_addr = self._identify_crash_addr(testcase, channel, pre_fire_hook,
+                                                    delay=delay, actions=actions)
+        l.info("DumbTracer identified the crash_addr @ %#x", self.crash_addr)
 
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay,
-                                 trace_bb_addr=(self.crash_addr, 1), crash_addr=(self.crash_addr, 1), pre_fire_hook=pre_fire_hook, record_trace=True)
+                                 trace_bb_addr=(self.crash_addr, 1), crash_addr=(self.crash_addr, 1),
+                                 pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions)
         self.trace_result = r
         self.testcase = testcase
         self.channel = channel
