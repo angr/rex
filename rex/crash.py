@@ -20,14 +20,11 @@ from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFac
 from .vulnerability import Vulnerability
 from .enums import CrashInputType
 from .preconstrained_file_stream import SimPreconstrainedFileStream
-from .crash_tracer import TraceMode, SimTracer, HalfwayTracer, DumbTracer
+from .crash_tracer import TraceMode, SimTracer, HalfwayTracer, DumbTracer, NonCrashingInput
 
 
 l = logging.getLogger("rex.Crash")
 
-
-class NonCrashingInput(Exception):
-    pass
 
 class BaseCrash:
     """
@@ -336,12 +333,13 @@ class CommCrash(SimCrash):
             tracer_opts['angr_project_bow'] = angr_project_bow
         self._tracer_opts = tracer_opts
 
+        is_cgc = self.target.target_os == 'cgc'
         if trace_mode == TraceMode.FULL_SYMBOLIC:
-            self.tracer = SimTracer(**tracer_opts)
+            self.tracer = SimTracer(**tracer_opts, is_cgc=is_cgc)
         elif trace_mode == TraceMode.HALFWAY:
-            self.tracer = HalfwayTracer(**tracer_opts)
+            self.tracer = HalfwayTracer(**tracer_opts, is_cgc=is_cgc)
         elif trace_mode == TraceMode.DUMB:
-            self.tracer = DumbTracer(**tracer_opts)
+            self.tracer = DumbTracer(**tracer_opts, is_cgc=is_cgc)
         else:
             raise ValueError("Unknown trace_mode: %s" % trace_mode)
 
@@ -363,6 +361,9 @@ class CommCrash(SimCrash):
                                                                              self.pre_fire_hook,
                                                                              delay=self.delay,
                                                                              actions=self.actions)
+        if self.tracer._is_cgc:
+            self.tracer.cgc_flag_page_magic = self.trace_result.magic_contents
+
 
     def symbolic_trace(self):
         """
@@ -372,14 +373,9 @@ class CommCrash(SimCrash):
         :return:                None.
         """
 
-        if self.is_cgc:
-            cgc_flag_page_magic = self._cgc_get_flag_page_magic()
-        else:
-            cgc_flag_page_magic = None
-
         # Prepare the initial state
         if self.initial_state is None:
-            self.initial_state = self._create_initial_state(self._test_case, cgc_flag_page_magic=cgc_flag_page_magic)
+            self.initial_state = self._create_initial_state(self._test_case, cgc_flag_page_magic=self.tracer.cgc_flag_page_magic)
 
         simgr = self.project.factory.simulation_manager(
             self.initial_state,
@@ -502,20 +498,6 @@ class CommCrash(SimCrash):
         self._channel = channel
         self._test_case = test_case
         return channel, test_case
-
-    def _cgc_get_flag_page_magic(self):
-        """
-        [CGC only] Get the magic content in flag page for CGC binaries.
-
-        :return:    The magic page content.
-        """
-
-        r = self.tracer.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash_input)
-        if not r.crashed:
-            if not self.tracer.tracer_bow.fire(save_core=True, testcase=self.crash_input, report_bad_args=True).crashed:
-                l.warning("input did not cause a crash")
-                raise NonCrashingInput
-        return r.magic_contents
 
     @staticmethod
     def input_type_to_channel(input_type):

@@ -14,6 +14,9 @@ from ..enums import CrashInputType
 
 l = logging.getLogger("rex.CrashTracer")
 
+class NonCrashingInput(Exception):
+    pass
+
 class CrashTracerError(Exception):
     pass
 
@@ -29,7 +32,7 @@ add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRET
                so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
 
 class CrashTracer:
-    def __init__(self, tracer_bow=None, angr_project_bow=None):
+    def __init__(self, tracer_bow=None, angr_project_bow=None, is_cgc=False):
         """
         :param tracer_bow:          (deprecated)The bow instance to use for tracing operations
         :param angr_project_bow:    The project bow to use, can be used for custom hooks and syscalls
@@ -37,6 +40,10 @@ class CrashTracer:
         self.tracer_bow = tracer_bow
         self.angr_project_bow = angr_project_bow
         self.project = None
+
+        # cgc related
+        self._is_cgc = is_cgc
+        self.cgc_flag_page_magic = None
 
     @abstractmethod
     def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
@@ -82,9 +89,8 @@ class SimTracer(CrashTracer):
         super().__init__(**kwargs)
 
     def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
-        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True,
+        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, record_magic=self._is_cgc,
                                  pre_fire_hook=pre_fire_hook, delay=delay, actions=actions)
-
         # if a coredump is available, save a copy of all registers in the coredump for future references
         assert r.core_path and os.path.isfile(r.core_path)
         tiny_core = TinyCore(r.core_path)
@@ -120,8 +126,7 @@ class HalfwayTracer(CrashTracer):
         # and use the core dump to create an angr project
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, record_trace=True,
                                  trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=delay,
-                                 pre_fire_hook=pre_fire_hook, actions=actions)
-
+                                 pre_fire_hook=pre_fire_hook, actions=actions, record_magic=self._is_cgc)
         # if a coredump is available, save a copy of all registers in the coredump for future references
         assert r.core_path and os.path.isfile(r.core_path)
         tiny_core = TinyCore(r.core_path)
@@ -176,7 +181,8 @@ class DumbTracer(CrashTracer):
         run the target once to identify crash_addr
         """
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=False, delay=delay,
-                                 pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions)
+                                 pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions,
+                                 record_magic=self._is_cgc)
         if not r.crashed:
             raise CrashTracerError("The target is not crashed inside QEMU!")
         return r.trace[-1]
