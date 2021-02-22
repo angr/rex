@@ -42,7 +42,6 @@ def _check_arsenal_has_send(arsenal):
 # this should be removed when we reduce the amount of solver thrashing that happens in claripy
 # or when we move to a test runner with more RAM.
 #
-@attr(speed='slow')
 def test_legit_00001():
     # Test exploitation of legit_00001 given a good crash.
 
@@ -447,7 +446,8 @@ def test_halfway_tracing():
     bin_path = os.path.join(bin_location, "tests", "x86_64", "stack_smash")
     with archr.targets.LocalTarget([bin_path], target_arch='x86_64').build().start() as target:
         tracer_opts = {"trace_addr": 0x4005bd}
-        crash = rex.Crash(target, inp, fast_mode=True, use_rop=True, trace_mode="halfway", tracer_opts=tracer_opts)
+        crash = rex.Crash(target, inp, fast_mode=True, use_rop=True, trace_mode="halfway", tracer_opts=tracer_opts,
+                          rop_cache_path=os.path.join(cache_location, 'halfway_stack_smash'))
         exp = crash.exploit()
 
         nose.tools.assert_true('rop_to_system' in exp.arsenal)

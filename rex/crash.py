@@ -950,16 +950,14 @@ class Crash(CommCrash):
                 f.write(new_input)
 
         # create a new crash object starting here
-        use_rop = self.rop is not None
         tracer_opts = self._tracer_opts.copy()
         tracer_opts["tracer_bow"] = self.tracer.tracer_bow
         self.__init__(self.target,
                 crash=new_input,
                 tracer_opts=tracer_opts,
-                tracer_bow=self.tracer.tracer_bow,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
-                use_rop=use_rop,
+                use_rop=self._use_rop,
                 angrop_object=self.rop)
 
     def _explore_arbitrary_write(self, path_file=None):
@@ -1008,13 +1006,14 @@ class Crash(CommCrash):
             with open(path_file, 'w') as f:
                 f.write(new_input)
 
-        use_rop = self.rop is not None
+        tracer_opts = self._tracer_opts.copy()
+        tracer_opts["tracer_bow"] = self.tracer.tracer_bow
         self.__init__(self.target,
                 new_input,
-                tracer_bow=self.tracer.tracer_bow,
+                tracer_opts=tracer_opts,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
-                use_rop=use_rop,
+                use_rop=self._use_rop,
                 angrop_object=self.rop)
 
     def _filter_memory_writes(self):
