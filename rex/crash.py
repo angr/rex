@@ -277,13 +277,16 @@ class CommCrash(SimCrash):
     """
     Even more advanced crash object handling target communication and tracing
     """
-    def __init__(self, target, crash=None, trace_mode=TraceMode.FULL_SYMBOLIC, tracer_opts=None, tracer_bow=None, angr_project_bow=None,
+    def __init__(self, target, crash=None, pov_file=None, actions=None,
+                 trace_mode=TraceMode.FULL_SYMBOLIC, tracer_opts=None, tracer_bow=None, angr_project_bow=None,
                  input_type=CrashInputType.STDIN, port=None,
-                 delay=0, pre_fire_hook=None, angr_project_bow=None
-                 pov_file=None, format_infos=None, **kwargs):
+                 delay=0, pre_fire_hook=None,
+                 format_infos=None, **kwargs):
         """
         :param target:              archr Target that contains the binary that crashed.
         :param crash:               String of input which crashed the binary.
+        :param pov_file:            CGC PoV describing a crash.
+        :param actions:             archr actions to interact with the target
         :param trace_mode           the tracer to use. Currently supports "dumb", "halfway" and "full_symbolic"
         :param tracer_opts          specify options for tracer, see CrashTracer
         :param tracer_bow:          (deprecated)The bow instance to use for tracing operations
@@ -297,7 +300,6 @@ class CommCrash(SimCrash):
                                     to the target
         :param actions:             the actions to interact with the target, if specified, crash or pov_file will be ignored
                                     during interaction with the target
-        :param pov_file:            CGC PoV describing a crash.
         :param format_infos:        A list of atoi FormatInfo objects that should
                                     be used when analyzing the crash.
         """
@@ -323,7 +325,6 @@ class CommCrash(SimCrash):
         self.binary = self.target.resolve_local_path(self.target.target_path)
         self._test_case = None
         self._channel = None
-        self.tracer_bow = tracer_bow if tracer_bow is not None else archr.arsenal.QEMUTracerBow(self.target)
 
         # tracing related
         if tracer_opts is None: tracer_opts = {}
@@ -333,6 +334,7 @@ class CommCrash(SimCrash):
         tracer_opts['tracer_bow'] = tracer_bow
         if tracer_opts.pop("angr_project_bow", None) is None:
             tracer_opts['angr_project_bow'] = angr_project_bow
+        self._tracer_opts = tracer_opts
 
         if trace_mode == TraceMode.FULL_SYMBOLIC:
             self.tracer = SimTracer(**tracer_opts)
@@ -508,9 +510,9 @@ class CommCrash(SimCrash):
         :return:    The magic page content.
         """
 
-        r = self.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash_input)
+        r = self.tracer.tracer_bow.fire(save_core=True, record_magic=True, testcase=self.crash_input)
         if not r.crashed:
-            if not self.tracer_bow.fire(save_core=True, testcase=self.crash_input, report_bad_args=True).crashed:
+            if not self.tracer.tracer_bow.fire(save_core=True, testcase=self.crash_input, report_bad_args=True).crashed:
                 l.warning("input did not cause a crash")
                 raise NonCrashingInput
         return r.magic_contents
@@ -541,14 +543,15 @@ class Crash(CommCrash):
     Triage and exploit a crash using angr.
     The highest level crash object, perform analysis on the crash state.
     """
-
-    def __init__(self, target, aslr=None, use_crash_input=False, explore_steps=0, **kwargs):
+    def __init__(self, target, crash=None, pov_file=None, actions=None,
+                       aslr=None, use_crash_input=False, explore_steps=0, **kwargs):
         """
         :param aslr:                Analyze the crash with aslr on or off.
         :param use_crash_input:     if a byte is not constrained by the generated exploits,
                                     use the original crash input to fill the byte.
         """
-        super().__init__(target, **kwargs)
+        # for backward compatibility, inputs are specified in Crash
+        super().__init__(target, crash=crash, pov_file=pov_file, actions=actions, **kwargs)
 
         self.use_crash_input = use_crash_input
         self.crash_types = [ ]  # crash type
@@ -953,9 +956,12 @@ class Crash(CommCrash):
 
         # create a new crash object starting here
         use_rop = self.rop is not None
+        tracer_opts = self._tracer_opts.copy()
+        tracer_opts["tracer_bow"] = self.tracer.tracer_bow
         self.__init__(self.target,
-                new_input,
-                tracer_bow=self.tracer_bow,
+                crash=new_input,
+                tracer_opts=tracer_opts,
+                tracer_bow=self.tracer.tracer_bow,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
                 use_rop=use_rop,
@@ -1010,7 +1016,7 @@ class Crash(CommCrash):
         use_rop = self.rop is not None
         self.__init__(self.target,
                 new_input,
-                tracer_bow=self.tracer_bow,
+                tracer_bow=self.tracer.tracer_bow,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
                 use_rop=use_rop,
