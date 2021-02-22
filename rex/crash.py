@@ -34,15 +34,13 @@ class BaseCrash:
     Some basic functionalities: handles angrop
     """
 
-    def __init__(self, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None,
-                 rop_cache_tuple=None):
+    def __init__(self, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None):
         """
         :param use_rop:             Whether or not to use rop.
         :param fast_mode:           whether to use fast_mode in angrop, fast_mode can generate
                                     no gadgets some times
         :param angrop_object:       whether to directly load existing angrop_object
-        :param rop_cache_path:      path of pickled angrop gadget cache
-        :param rop_cache_tuple:     A angrop tuple to load from.
+        :param rop_cache_path:      path of pickled angrop cache
         """
         self.project = None
         self.tracer = None
@@ -53,7 +51,6 @@ class BaseCrash:
 
         self._use_rop = use_rop
         self._rop_fast_mode = fast_mode
-        self._rop_cache_tuple = rop_cache_tuple
         self._rop_cache_path = rop_cache_path
 
     def _get_cache_path(self, binary):
@@ -81,14 +78,12 @@ class BaseCrash:
 
         # finally, create an angrop object
         rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
-        if self._rop_cache_tuple is not None:
-            l.info("Loading rop gadgets from cache tuple...")
-            rop._load_cache_tuple(self._rop_cache_tuple)
-        elif os.path.exists(self._rop_cache_path):
+        if os.path.exists(self._rop_cache_path):
             l.info("Loading rop gadgets from cache file %s...", self._rop_cache_path)
             rop.load_gadgets(self._rop_cache_path)
         else:
             l.info("Collecting ROP gadgets... don't panic if you see tons of error messages!")
+            l.info("It may take several minutes to finish...")
             if angr.misc.testing.is_testing:
                 rop.find_gadgets_single_threaded(show_progress=False)
             else:
@@ -133,6 +128,7 @@ class BaseCrash:
             libc_rop.load_gadgets(libc_rop_cache_path)
         else:
             l.info("Collecting ROP gadgets in libc... don't panic if you see tons of error messages!")
+            l.info("It may take several minutes to finish...")
             if angr.misc.testing.is_testing:
                 libc_rop.find_gadgets_single_threaded(show_progress=False)
             else:
