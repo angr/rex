@@ -849,6 +849,7 @@ class Crash(CommCrash):
         cp.binary = self.binary
         cp.tracer = self.tracer
         cp.crash_input = self.crash_input
+        cp.pov_file = self.pov_file
         cp.input_type = self.input_type
         cp.project = self.project
         cp.aslr = self.aslr
@@ -868,6 +869,7 @@ class Crash(CommCrash):
         cp.constrained_addrs = list(self.constrained_addrs)
         cp.core_registers = self.core_registers.copy() if self.core_registers is not None else None
         cp.actions = self.actions
+        cp._rop_cache_path = self._rop_cache_path
 
         return cp
 
