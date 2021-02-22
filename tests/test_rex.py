@@ -206,7 +206,7 @@ def test_linux_stacksmash_64():
     ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
     path = os.path.join(lib_path, "vuln_stacksmash")
     with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='x86_64').build().start() as target:
-        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
+        crash = rex.Crash(target, crash=inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
 
         exploit = crash.exploit()
         crash.project.loader.close()
@@ -244,14 +244,14 @@ def test_linux_network_stacksmash_64():
     # Test exploiting a simple network server with a stack-based buffer overflow.
     inp = b'\x00' * 500
     lib_path = os.path.join(bin_location, "tests/x86_64")
-    ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
+    # ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
     path = os.path.join(lib_path, "network_overflow")
     port = random.randint(8000, 9000)
     with archr.targets.LocalTarget([path, str(port)], path,
                                    target_arch='x86_64',
                                    ipv4_address="127.0.0.1",
                                    tcp_ports=(port,)).build().start() as target:
-        crash = rex.Crash(target, inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
+        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
                           input_type=rex.enums.CrashInputType.TCP, port=port)
 
         exploit = crash.exploit()
@@ -270,15 +270,15 @@ def test_linux_network_stacksmash_64():
                                    ipv4_address="127.0.0.1",
                                    tcp_ports=(new_port,)).build().start() as new_target:
         try:
-            p = new_target.run_command("")
+            new_target.run_command("")
 
             # wait for the target to load
             time.sleep(.5)
-            
+
             temp_script = tempfile.NamedTemporaryFile(suffix=".py", delete=False)
             exploit_location = temp_script.name
             temp_script.close()
-            
+
             exploit.arsenal['call_shellcode'].script(exploit_location)
 
             exploit_result = subprocess.check_output(["python", exploit_location,

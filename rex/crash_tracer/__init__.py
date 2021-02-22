@@ -183,6 +183,7 @@ class DumbTracer(CrashTracer):
 
     def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         """
+        identify the crash location and then generate a coredump before crashing
         """
         self.crash_addr = self._identify_crash_addr(testcase, channel, pre_fire_hook,
                                                     delay=delay, actions=actions)

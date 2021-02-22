@@ -53,11 +53,6 @@ class BaseCrash:
         self._rop_fast_mode = fast_mode
         self._rop_cache_path = rop_cache_path
 
-    def _get_cache_path(self, binary):
-        # hash binary contents for rop cache name
-        binhash = hashlib.md5(open(binary, 'rb').read()).hexdigest()
-        return os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(binary), binhash))
-
     def initialize_rop(self):
         """
         Use angrop to generate ROP gadgets and such for the target binary.
@@ -135,6 +130,12 @@ class BaseCrash:
                 libc_rop.find_gadgets(show_progress=False)
             libc_rop.save_gadgets(libc_rop_cache_path)
         self.libc_rop = libc_rop
+
+    @staticmethod
+    def _get_cache_path(binary):
+        # hash binary contents for rop cache name
+        binhash = hashlib.md5(open(binary, 'rb').read()).hexdigest()
+        return os.path.join("/tmp", "%s-%s-rop" % (os.path.basename(binary), binhash))
 
 class SimCrash(BaseCrash):
     """
@@ -1124,7 +1125,7 @@ class Crash(CommCrash):
 
         replace_dict = dict()
         for c in state.preconstrainer.preconstraints:
-            if any([v.startswith('cgc-flag') or v.startswith("random") for v in list(c.variables)]):
+            if any(v.startswith('cgc-flag') or v.startswith("random") for v in list(c.variables)):
                 concrete = next(a for a in c.args if not a.symbolic)
                 symbolic = next(a for a in c.args if a.symbolic)
                 replace_dict[symbolic.cache_key] = concrete
