@@ -282,4 +282,6 @@ class DumbTracer(CrashTracer):
         for i in range(max_len):
             state.solver.add(sim_chunk.get_byte(i) != 0)
             state.solver.add(sim_chunk.get_byte(i) != 0x20)
+            state.solver.add(sim_chunk.get_byte(i) != 0x25)
+            state.solver.add(sim_chunk.get_byte(i) != 0x2b)
         return state
