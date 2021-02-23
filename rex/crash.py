@@ -136,7 +136,7 @@ class BaseCrash:
         if os.path.exists(self._rop_cache_path):
             return
         rop_cache_tuple = self.rop._get_cache_tuple()
-        libc_rop_cache_tuple = self.rop._get_cache_tuple()
+        libc_rop_cache_tuple = self.libc_rop._get_cache_tuple()
         rop_cache = (rop_cache_tuple, libc_rop_cache_tuple)
         with open(self._rop_cache_path, "wb") as f:
             pickle.dump(rop_cache, f)
@@ -871,6 +871,7 @@ class Crash(CommCrash):
         cp = Crash.__new__(Crash)
         cp.target = self.target
         cp.binary = self.binary
+        cp.libc_binary = self.libc_binary
         cp.tracer = self.tracer
         cp.crash_input = self.crash_input
         cp.pov_file = self.pov_file
