@@ -33,19 +33,18 @@ class BaseCrash:
     Some basic functionalities: handles angrop
     """
 
-    def __init__(self, use_rop=True, fast_mode=False, angrop_object=None, rop_cache_path=None):
+    def __init__(self, use_rop=True, fast_mode=False, rop_cache_path=None):
         """
         :param use_rop:             Whether or not to use rop.
         :param fast_mode:           whether to use fast_mode in angrop, fast_mode can generate
                                     no gadgets some times
-        :param angrop_object:       whether to directly load existing angrop_object
         :param rop_cache_path:      path of pickled angrop cache
         """
         self.project = None
         self.tracer = None
         self.binary = None
         self.libc_binary = None
-        self.rop = angrop_object
+        self.rop = None
         self.libc_rop = None
 
         self._use_rop = use_rop
@@ -985,8 +984,7 @@ class Crash(CommCrash):
                 tracer_opts=tracer_opts,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
-                use_rop=self._use_rop,
-                angrop_object=self.rop)
+                use_rop=self._use_rop)
 
     def _explore_arbitrary_write(self, path_file=None):
         # crash type was an arbitrary-write, this routine doesn't care about taking advantage
@@ -1041,8 +1039,7 @@ class Crash(CommCrash):
                 tracer_opts=tracer_opts,
                 explore_steps=self.explore_steps + 1,
                 constrained_addrs=self.constrained_addrs + [self.violating_action],
-                use_rop=self._use_rop,
-                angrop_object=self.rop)
+                use_rop=self._use_rop)
 
     def _filter_memory_writes(self):
         """
