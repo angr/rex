@@ -31,8 +31,7 @@ def _do_pov_test(pov, enable_randomness=True):
 def _check_arsenal_has_send(arsenal):
     # Test that the script generated for the arsenal has sends (i.e. is not null)
     for exploit in arsenal.values():
-        exploit.script()
-        assert "r.send" in exploit._script_string
+        assert "send_all" in exploit.script()
 
 
 #
@@ -278,7 +277,7 @@ def test_linux_network_stacksmash_64():
             exploit_location = temp_script.name
             temp_script.close()
 
-            exploit.arsenal['call_shellcode'].script(exploit_location)
+            exploit.arsenal['call_shellcode'].script(filename=exploit_location)
 
             exploit_result = subprocess.check_output(["python", exploit_location,
                                                       "127.0.0.1", str(new_port),
