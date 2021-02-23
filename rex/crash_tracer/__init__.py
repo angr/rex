@@ -245,7 +245,10 @@ class DumbTracer(CrashTracer):
         assert self.testcase.count(marker) == 1, "The input should have high entropy, cyclic is recommended"
 
         # search for the max length of the controlled data
-        data = state.solver.eval(state.memory.load(controlled_addr, 0x200), cast_to=bytes)
+        controlled_addr_val = state.solver.eval(controlled_addr)
+        obj = state.project.loader.find_object_containing(controlled_addr_val)
+        max_buffer_size = min(obj.max_addr - controlled_addr_val, len(self.testcase))
+        data = state.solver.eval(state.memory.load(controlled_addr, max_buffer_size), cast_to=bytes)
         assert data[:marker_size] == self.testcase[marker_idx:marker_idx+marker_size]
         for max_len in range(marker_size, len(data), word_size):
             if data[:max_len] != self.testcase[marker_idx:marker_idx+max_len]:
