@@ -214,6 +214,7 @@ class DumbTracer(CrashTracer):
         return project
 
     def _create_state(self, target, **kwargs):
+        self.project.loader.main_object = self.project.loader.elfcore_object
         initial_state = self.project.factory.blank_state(
             mode='tracing',
             add_options=add_options,

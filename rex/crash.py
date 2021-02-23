@@ -7,13 +7,14 @@ import logging
 import operator
 import pickle
 
+import archr
+import claripy
+from tracer import TracerPoV
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
 from angr.state_plugins.posix import SimSystemPosix
 from angr.storage.file import SimFileStream
 from angr.exploration_techniques.tracer import TracingMode
-import archr
-from tracer import TracerPoV
 from archr.analyzers.angr_state import SimArchrProcMount
 
 from .exploit import CannotExploit, CannotExplore, ExploitFactory, CGCExploitFactory
@@ -322,7 +323,7 @@ class CommCrash(SimCrash):
         # input related, ensure crash_input is a list of input
         # ensure actions are defined
         self.pov_file = pov_file
-        self.crash_input, self.actions = self._input_preparation(crash, actions, input_type)
+        self.crash_input, self.actions, self.sim_input = self._input_preparation(crash, actions, input_type)
 
         # communication related
         self.target = target # type: archr.targets.Target
@@ -362,21 +363,27 @@ class CommCrash(SimCrash):
         self.format_infos = format_infos
 
     def _input_preparation(self, crash_input, actions, input_type):
+        # FIXME: current implementation assumes there is no short read
+        # it can be fixed by implementing a "read stop" mechanism in precontrained_file
         assert not self.pov_file, "POV file is not supported anymore!"
         assert actions or crash_input
 
         channel = self.input_type_to_channel(input_type)
 
         if actions:
-            crash_input = []
+            crash_input = b''
+            sim_input = []
             for act in actions:
                 if type(act) == RexSendAction:
-                    crash_input.append(act.data)
+                    crash_input += act.data
+                    sim_input.append(act.sim_data)
+            sim_input = claripy.Concat(*sim_input)
         else:
             open_act = RexOpenChannelAction(channel_name=channel)
             send_act = RexSendAction(crash_input, channel_name=channel)
             actions = [open_act, send_act]
-        return crash_input, actions
+            sim_input = send_act.sim_data
+        return crash_input, actions, sim_input
 
     def concrete_trace(self):
         """
@@ -463,7 +470,8 @@ class CommCrash(SimCrash):
                 input_sock = SimPreconstrainedFileStream(
                     preconstraining_handler=self._preconstrain_file,
                     name="aeg_tcp_in_%d" % i,
-                    ident='aeg_input_tcp_%d' % i
+                    ident='aeg_input_tcp_%d' % i,
+                    content=self.sim_input
                 )
                 output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
                 socket_queue.append([input_sock, output_sock])
@@ -471,7 +479,8 @@ class CommCrash(SimCrash):
             stdin_file = SimPreconstrainedFileStream(
                 preconstraining_handler=self._preconstrain_file,
                 name='stdin',
-                ident='aeg_input_stdin'
+                ident='aeg_input_stdin',
+                content=self.sim_input
             )
 
         # if we already have a core dump, use it to create the initial state
@@ -888,6 +897,7 @@ class Crash(CommCrash):
         cp.core_registers = self.core_registers.copy() if self.core_registers is not None else None
         cp.actions = self.actions
         cp._rop_cache_path = self._rop_cache_path
+        cp.sim_input = self.sim_input
 
         return cp
 
