@@ -195,7 +195,7 @@ class SimCrash(BaseCrash):
     def get_sim_open_fds(self):
         try:
             open_fds = {'fd': [fd for fd in self.state.posix.fd if
-                        self.state.posix.fd[fd].read_storage.ident.startswith('aeg_stdin') and
+                        self.state.posix.fd[fd].read_storage.ident.startswith('aeg_input') and
                         self.state.solver.eval(self.state.posix.fd[fd].read_storage.pos) > 0]
             }
         except StopIteration:
@@ -323,7 +323,6 @@ class CommCrash(SimCrash):
         # ensure actions are defined
         self.pov_file = pov_file
         self.crash_input, self.actions = self._input_preparation(crash, actions, input_type)
-        print(self.crash_input, self.actions)
 
         # communication related
         self.target = target # type: archr.targets.Target
@@ -464,7 +463,7 @@ class CommCrash(SimCrash):
                 input_sock = SimPreconstrainedFileStream(
                     preconstraining_handler=self._preconstrain_file,
                     name="aeg_tcp_in_%d" % i,
-                    ident='aeg_stdin_%d' % i
+                    ident='aeg_input_tcp_%d' % i
                 )
                 output_sock = SimFileStream(name="aeg_tcp_out_%d" % i)
                 socket_queue.append([input_sock, output_sock])
@@ -472,7 +471,7 @@ class CommCrash(SimCrash):
             stdin_file = SimPreconstrainedFileStream(
                 preconstraining_handler=self._preconstrain_file,
                 name='stdin',
-                ident='aeg_stdin'
+                ident='aeg_input_stdin'
             )
 
         # if we already have a core dump, use it to create the initial state
@@ -1049,7 +1048,7 @@ class Crash(CommCrash):
             # remove all memory writes that directly end up in the CGC flag page (0x4347c000 - 0x4347d000)
             memory_writes = [m for m in memory_writes if m // 0x1000 != 0x4347c]
         user_writes = [m for m in memory_writes if
-                       any("aeg_stdin" in v for v in self.state.memory.load(m, 1).variables)]
+                       any("aeg_input" in v for v in self.state.memory.load(m, 1).variables)]
         if self.is_cgc:
             flag_writes = [m for m in memory_writes if
                            any(v.startswith("cgc-flag") for v in self.state.memory.load(m, 1).variables)]

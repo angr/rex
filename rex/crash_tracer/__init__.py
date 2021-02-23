@@ -263,7 +263,7 @@ class DumbTracer(CrashTracer):
             simfd = state.posix.fd[fd]
             if not isinstance(simfd, SimFileDescriptorDuplex):
                 continue
-            if simfd.read_storage.ident.startswith("aeg_stdin"):
+            if simfd.read_storage.ident.startswith("aeg_input"):
                 break
         else:
             raise CrashTracerError("Fail to find the input socket")
