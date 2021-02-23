@@ -119,7 +119,6 @@ class HalfwayTracer(CrashTracer):
         self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
         self.trace_bb_addr = None
         self.trace_result = None
-        self.elfcore_obj = None # this is for the main_object swap hack
 
     def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         # to enable halfway-tracing, we need to generate a coredump at the wanted address first
@@ -138,18 +137,17 @@ class HalfwayTracer(CrashTracer):
         self._init_angr_project_bow(target)
         project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
 
-        self.elfcore_obj = project.loader.main_object
-        project.loader.main_object = project.loader.main_object._main_object
+        project.loader.main_object = project.loader.elfcore_object._main_object
         self.project = project
         return project
 
     def _create_state(self, target, **kwargs):
-        self.project.loader.main_object = self.elfcore_obj
+        self.project.loader.main_object = self.project.loader.elfcore_object
         initial_state = self.project.factory.blank_state(
             mode='tracing',
             add_options=add_options,
             remove_options=remove_options)
-        self.project.loader.main_object = self.project.loader.main_object._main_object
+        self.project.loader.main_object = self.project.loader.elfcore_object._main_object
         self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
         initial_state.fs.mount('/', SimArchrMount(target))
         return initial_state
@@ -171,7 +169,6 @@ class DumbTracer(CrashTracer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.trace_result = None
-        self.elfcore_obj = None
         self.crash_addr = None
         self.testcase = None
         self.channel = None
@@ -212,18 +209,16 @@ class DumbTracer(CrashTracer):
         self._init_angr_project_bow(target)
         project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
 
-        self.elfcore_obj = project.loader.main_object
-        project.loader.main_object = project.loader.main_object._main_object
+        project.loader.main_object = project.loader.elfcore_object._main_object
         self.project = project
         return project
 
     def _create_state(self, target, **kwargs):
-        self.project.loader.main_object = self.elfcore_obj
         initial_state = self.project.factory.blank_state(
             mode='tracing',
             add_options=add_options,
             remove_options=remove_options)
-        self.project.loader.main_object = self.project.loader.main_object._main_object
+        self.project.loader.main_object = self.project.loader.elfcore_object._main_object
         initial_state.fs.mount('/', SimArchrMount(target))
         return initial_state
 

@@ -21,6 +21,7 @@ from .vulnerability import Vulnerability
 from .enums import CrashInputType
 from .preconstrained_file_stream import SimPreconstrainedFileStream
 from .crash_tracer import TraceMode, SimTracer, HalfwayTracer, DumbTracer, NonCrashingInput
+from .exploit.actions import RexOpenChannelAction, RexSendAction
 
 
 l = logging.getLogger("rex.Crash")
@@ -318,10 +319,11 @@ class CommCrash(SimCrash):
         if trace_mode != TraceMode.DUMB and actions:
             raise NotImplementedError("actions only support dumb tracer at the moment")
 
-        # input related
-        self.actions = actions
-        self.crash_input = crash
+        # input related, ensure crash_input is a list of input
+        # ensure actions are defined
         self.pov_file = pov_file
+        self.crash_input, self.actions = self._input_preparation(crash, actions, input_type)
+        print(self.crash_input, self.actions)
 
         # communication related
         self.target = target # type: archr.targets.Target
@@ -359,6 +361,23 @@ class CommCrash(SimCrash):
 
         # cgc related
         self.format_infos = format_infos
+
+    def _input_preparation(self, crash_input, actions, input_type):
+        assert not self.pov_file, "POV file is not supported anymore!"
+        assert actions or crash_input
+
+        channel = self.input_type_to_channel(input_type)
+
+        if actions:
+            crash_input = []
+            for act in actions:
+                if type(act) == RexSendAction:
+                    crash_input.append(act.data)
+        else:
+            open_act = RexOpenChannelAction(channel_name=channel)
+            send_act = RexSendAction(crash_input, channel_name=channel)
+            actions = [open_act, send_act]
+        return crash_input, actions
 
     def concrete_trace(self):
         """
