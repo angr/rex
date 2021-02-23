@@ -288,7 +288,7 @@ class CommCrash(SimCrash):
     Even more advanced crash object handling target communication and tracing
     """
     def __init__(self, target, crash=None, pov_file=None, actions=None,
-                 trace_mode=TraceMode.FULL_SYMBOLIC, tracer_opts=None, tracer_bow=None, angr_project_bow=None,
+                 trace_mode=TraceMode.FULL_SYMBOLIC, tracer_opts=None,
                  input_type=CrashInputType.STDIN, port=None,
                  delay=0, pre_fire_hook=None,
                  format_infos=None, **kwargs):
@@ -299,8 +299,6 @@ class CommCrash(SimCrash):
         :param actions:             archr actions to interact with the target
         :param trace_mode           the tracer to use. Currently supports "dumb", "halfway" and "full_symbolic"
         :param tracer_opts          specify options for tracer, see CrashTracer
-        :param tracer_bow:          (deprecated)The bow instance to use for tracing operations
-        :param angr_project_bow:    (deprecated)The project bow to use, can be used for custom hooks and syscalls
         :param input_type:          the way the program takes input, usually CrashInputType.STDIN
         :param port:                In the case where the target takes TCP input, which port to connect to
         :param trace_addr:          Used in half-way tracing, this is the tuple (address, occurrence) where tracing starts
@@ -338,12 +336,7 @@ class CommCrash(SimCrash):
 
         # tracing related
         if tracer_opts is None: tracer_opts = {}
-        tracer_bow = tracer_opts.pop("tracer_bow", None)
-        if tracer_bow is None:
-            tracer_bow = archr.arsenal.QEMUTracerBow(self.target)
-        tracer_opts['tracer_bow'] = tracer_bow
-        if tracer_opts.pop("angr_project_bow", None) is None:
-            tracer_opts['angr_project_bow'] = angr_project_bow
+        tracer_opts['tracer_bow'] = tracer_opts.pop("tracer_bow", None) or archr.arsenal.QEMUTracerBow(self.target)
         self._tracer_opts = tracer_opts
 
         is_cgc = self.target.target_os == 'cgc'
@@ -423,7 +416,11 @@ class CommCrash(SimCrash):
         # since we have already grabbed mapping info through datascoutbow in angr_project_bow, we can assume
         # there are no aslr slides
         forward = isinstance(self.tracer, SimTracer)
-        self._t = self.trace_result.tracer_technique(keep_predecessors=2, copy_states=False, mode=TracingMode.Strict, aslr=False, fast_forward_to_entry=forward)
+        self._t = self.trace_result.tracer_technique(keep_predecessors=2,
+                                                     copy_states=False,
+                                                     mode=TracingMode.Strict,
+                                                     aslr=False,
+                                                     fast_forward_to_entry=forward)
         simgr.use_technique(self._t)
         simgr.use_technique(angr.exploration_techniques.Oppologist())
         if self.is_cgc:
