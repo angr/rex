@@ -182,18 +182,19 @@ class DumbTracer(CrashTracer):
                                  record_magic=self._is_cgc)
         if not r.crashed:
             raise CrashTracerError("The target is not crashed inside QEMU!")
-        return r.trace[-1]
+        crash_addr = r.trace[-1]
+        return crash_addr, r.trace.count(crash_addr)
 
     def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         """
         identify the crash location and then generate a coredump before crashing
         """
-        self.crash_addr = self._identify_crash_addr(testcase, channel, pre_fire_hook,
+        self.crash_addr, times = self._identify_crash_addr(testcase, channel, pre_fire_hook,
                                                     delay=delay, actions=actions)
         l.info("DumbTracer identified the crash_addr @ %#x", self.crash_addr)
 
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay,
-                                 trace_bb_addr=(self.crash_addr, 2), crash_addr=(self.crash_addr, 2),
+                                 trace_bb_addr=(self.crash_addr, times), crash_addr=(self.crash_addr, times),
                                  pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions)
         self.trace_result = r
         self.testcase = testcase
