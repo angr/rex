@@ -883,6 +883,7 @@ class Crash(CommCrash):
         cp.binary = self.binary
         cp.libc_binary = self.libc_binary
         cp.tracer = self.tracer
+        cp.trace_result = self.trace_result
         cp.crash_input = self.crash_input
         cp.pov_file = self.pov_file
         cp.input_type = self.input_type
