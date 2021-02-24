@@ -191,7 +191,7 @@ class DumbTracer(CrashTracer):
         """
         self.crash_addr, times = self._identify_crash_addr(testcase, channel, pre_fire_hook,
                                                     delay=delay, actions=actions)
-        l.info("DumbTracer identified the crash_addr @ %#x", self.crash_addr)
+        l.info("DumbTracer identified the crash_addr @ %#x:%d", self.crash_addr, times)
 
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay,
                                  trace_bb_addr=(self.crash_addr, times), crash_addr=(self.crash_addr, times),
