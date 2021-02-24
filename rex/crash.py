@@ -385,12 +385,21 @@ class CommCrash(SimCrash):
         """
         self.tracer.tracer_bow.pickup_env()
 
+        # use the last input as the taint to locate the communication socket fd
+        for i in range(len(self.actions)-1, -1, -1):
+            act = self.actions[i]
+            if type(act) == RexSendAction:
+                taint = act.data
+                break
+        taint = taint[:0x100]
+
         # transform input to channel and test_case
         channel, testcase = self._prepare_channel()
         self.trace_result, self.core_registers = self.tracer._concrete_trace(testcase, channel,
                                                                              self.pre_fire_hook,
                                                                              delay=self.delay,
-                                                                             actions=self.actions)
+                                                                             actions=self.actions,
+                                                                             taint=taint)
         if self.tracer._is_cgc:
             self.tracer.cgc_flag_page_magic = self.trace_result.magic_contents
 

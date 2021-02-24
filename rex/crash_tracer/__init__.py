@@ -46,7 +46,7 @@ class CrashTracer:
         self.cgc_flag_page_magic = None
 
     @abstractmethod
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         """
         generate a concrete trace and maybe core dump
         """
@@ -88,9 +88,9 @@ class SimTracer(CrashTracer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, record_magic=self._is_cgc,
-                                 pre_fire_hook=pre_fire_hook, delay=delay, actions=actions)
+                                 pre_fire_hook=pre_fire_hook, delay=delay, actions=actions, taint=taint)
         # if a coredump is available, save a copy of all registers in the coredump for future references
         assert r.core_path and os.path.isfile(r.core_path)
         tiny_core = TinyCore(r.core_path)
@@ -120,12 +120,12 @@ class HalfwayTracer(CrashTracer):
         self.trace_bb_addr = None
         self.trace_result = None
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         # to enable halfway-tracing, we need to generate a coredump at the wanted address first
         # and use the core dump to create an angr project
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, record_trace=True,
                                  trace_bb_addr=self.trace_addr, crash_addr=self.trace_addr, delay=delay,
-                                 pre_fire_hook=pre_fire_hook, actions=actions, record_magic=self._is_cgc)
+                                 pre_fire_hook=pre_fire_hook, actions=actions, record_magic=self._is_cgc, taint=taint)
         # if a coredump is available, save a copy of all registers in the coredump for future references
         assert r.core_path and os.path.isfile(r.core_path)
         tiny_core = TinyCore(r.core_path)
@@ -177,7 +177,8 @@ class DumbTracer(CrashTracer):
         """
         run the target once to identify crash_addr
         """
-        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=False, delay=delay,
+        # let's just be safe, recording a full trace takes a lot of time
+        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=False, delay=delay+15,
                                  pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions,
                                  record_magic=self._is_cgc)
         if not r.crashed:
@@ -185,7 +186,7 @@ class DumbTracer(CrashTracer):
         crash_addr = r.trace[-1]
         return crash_addr, r.trace.count(crash_addr)
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
+    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         """
         identify the crash location and then generate a coredump before crashing
         """
@@ -195,7 +196,7 @@ class DumbTracer(CrashTracer):
 
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay,
                                  trace_bb_addr=(self.crash_addr, times), crash_addr=(self.crash_addr, times),
-                                 pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions)
+                                 pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions, taint=taint)
         self.trace_result = r
         self.testcase = testcase
         self.channel = channel
