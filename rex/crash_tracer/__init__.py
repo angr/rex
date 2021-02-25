@@ -1,16 +1,9 @@
-import os
 import logging
-
 from abc import abstractmethod
-from typing import Union, Tuple
 
 import archr
-from tracer import TinyCore
 from angr import sim_options as so
-from archr.analyzers.angr_state import SimArchrMount
-from angr.storage.file import SimFileDescriptorDuplex
 
-from ..enums import CrashInputType
 
 l = logging.getLogger("rex.CrashTracer")
 
@@ -108,6 +101,7 @@ class CrashTracer:
                 continue
             bad_bytes.append(c)
         return bad_bytes
+
 
 from .full_tracer import SimTracer
 from .halfway_tracer import HalfwayTracer

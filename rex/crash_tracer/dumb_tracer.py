@@ -1,6 +1,7 @@
 import os
 import copy
 import logging
+from typing import TYPE_CHECKING
 
 import nclib
 import archr
@@ -12,6 +13,10 @@ from angr.storage.file import SimFileDescriptorDuplex
 from . import CrashTracer, CrashTracerError, add_options, remove_options
 from ..enums import CrashInputType
 from ..exploit.actions import RexSendAction
+
+if TYPE_CHECKING:
+    from angr import Project
+
 
 l = logging.getLogger("rex.DumbTracer")
 
@@ -46,20 +51,41 @@ class DumbTracer(CrashTracer):
                                  record_magic=self._is_cgc)
         if not r.crashed:
             raise CrashTracerError("The target is not crashed inside QEMU!")
-        crash_addr = r.trace[-1]
-        return crash_addr, r.trace.count(crash_addr)
+        crash_block_addr = r.trace[-1]
+
+        # if the crash_address is within the crashing block, the crashing instruction is the crash address.
+        # otherwise, it's very likely that the last branch/return instruction uses corrupted branch/return target, in
+        # which case we mare the last instruction as the crashing instruction.
+        self._init_angr_project_bow(self.tracer_bow.target)
+        proj: 'Project' = self.angr_project_bow.fire()
+        crash_block = proj.factory.block(crash_block_addr)
+        if r.crash_address in crash_block.instruction_addrs:
+            crash_insn_addr = r.crash_address
+        else:
+            if not crash_block.instruction_addrs:
+                raise CrashTracerError("Unexpected situation: The last traced block does not have any instructions.")
+            if proj.arch.branch_delay_slot and len(crash_block.instruction_addrs > 1):
+                crash_insn_addr = crash_block.instruction_addrs[-2]
+            else:
+                crash_insn_addr = crash_block.instruction_addrs[-1]
+
+        # Hack: we only need this project once, so let's destroy the initialized project bow and the project
+        self.angr_project_bow.project = None
+        self.angr_project_bow = None
+
+        return crash_block_addr, r.trace.count(crash_block_addr), crash_insn_addr
 
     def concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         """
         identify the crash location and then generate a coredump before crashing
         """
-        self.crash_addr, times = self._identify_crash_addr(testcase, channel, pre_fire_hook,
-                                                    delay=delay, actions=actions)
+        crash_block_addr, times, self.crash_addr = self._identify_crash_addr(testcase, channel, pre_fire_hook,
+                                                                             delay=delay, actions=actions)
         self.crash_addr_times = times
         l.info("DumbTracer identified the crash_addr @ %#x:%d", self.crash_addr, times)
 
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay,
-                                 trace_bb_addr=(self.crash_addr, times), crash_addr=(self.crash_addr, times),
+                                 trace_bb_addr=(crash_block_addr, times), crash_addr=(self.crash_addr, times),
                                  pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions, taint=taint)
         self.trace_result = r
         self.testcase = testcase
@@ -94,11 +120,26 @@ class DumbTracer(CrashTracer):
         """
         perform analysis to input-state correspondence and then add the constraints in the state
         """
+
+        # if we are not at the crashing address yet, step the state symbolically until it reaches there
+        if state.addr != self.crash_addr:
+            block = self.project.factory.block(state.addr)
+            if self.crash_addr not in block.instruction_addrs:
+                raise CrashTracerError("Unexpected: The crashing address does not exist in the crashing block.")
+            block_size = self.crash_addr - state.addr
+            simgr = self.project.factory.simgr(state)
+            simgr.step(size=block_size)
+            assert len(simgr.active) == 1  # no branching should have happened
+            # take the state at the crashing instruction
+            crashing_state = simgr.active[0]
+        else:
+            crashing_state = state
+
         word_size = self.project.arch.bytes
         marker_size = word_size * 3 # the minimal amount of gadgets to be useful
 
         # we operate on concrete memory so far, so it is safe to load and eval concrete memory
-        data = state.solver.eval(state.memory.load(state.regs.sp, 0x400), cast_to=bytes)
+        data = crashing_state.solver.eval(crashing_state.memory.load(crashing_state.regs._sp, 0x400), cast_to=bytes)
 
         # identify marker from the original input on stack
         for i in range(0, len(data), marker_size):
@@ -107,15 +148,15 @@ class DumbTracer(CrashTracer):
                 break
         else:
             raise CrashTracerError("Fail to identify marker from the original input")
-        input_addr = state.regs.sp + i
+        input_addr = crashing_state.regs._sp + i
         marker_idx = self.testcase.index(marker)
         assert self.testcase.count(marker) == 1, "The input should have high entropy, cyclic is recommended"
 
         # search for the max length of the controlled data
-        input_addr_val = state.solver.eval(input_addr)
-        obj = state.project.loader.find_object_containing(input_addr_val)
+        input_addr_val = crashing_state.solver.eval(input_addr)
+        obj = crashing_state.project.loader.find_object_containing(input_addr_val)
         max_buffer_size = min(obj.max_addr - input_addr_val, len(self.testcase))
-        data = state.solver.eval(state.memory.load(input_addr, max_buffer_size), cast_to=bytes)
+        data = crashing_state.solver.eval(crashing_state.memory.load(input_addr, max_buffer_size), cast_to=bytes)
         assert data[:marker_size] == self.testcase[marker_idx:marker_idx+marker_size]
         for max_len in range(marker_size, len(data), word_size):
             if data[:max_len] != self.testcase[marker_idx:marker_idx+max_len]:
