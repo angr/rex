@@ -21,8 +21,8 @@ class DumbTracer(CrashTracer):
     and then replace the crash input with symbolic data
     FIXME: assumption: the target can be fired multiple times with the same behavior
     """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, crash, **kwargs):
+        super().__init__(crash, **kwargs)
         self.trace_result = None
         self.crash_addr = None
         self.crash_addr_times = None
@@ -34,6 +34,7 @@ class DumbTracer(CrashTracer):
         self._input_addr = None
         self._initial_state = None
         self._buffer_size = None
+        self._bad_bytes = None
 
     def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         """
@@ -97,8 +98,7 @@ class DumbTracer(CrashTracer):
         marker_size = word_size * 3 # the minimal amount of gadgets to be useful
 
         # we operate on concrete memory so far, so it is safe to load and eval concrete memory
-        data_len = state.regs.sp - state.regs.bp + 0x100
-        data = state.solver.eval(state.memory.load(state.regs.sp, data_len), cast_to=bytes)
+        data = state.solver.eval(state.memory.load(state.regs.sp, 0x400), cast_to=bytes)
 
         # identify marker from the original input on stack
         for i in range(0, len(data), marker_size):
@@ -147,13 +147,12 @@ class DumbTracer(CrashTracer):
         sim_chunk = simfd.read_storage.load(marker_idx, max_len)
         state.memory.store(input_addr, sim_chunk)
 
-        ## do not allow null byte and blank
-        ## FIXME: should perform some value analysis just in case null byte is allowed
-        #for i in range(max_len):
-        #    state.solver.add(sim_chunk.get_byte(i) != 0)
-        #    state.solver.add(sim_chunk.get_byte(i) != 0x20)
-        #    state.solver.add(sim_chunk.get_byte(i) != 0x25)
-        #    state.solver.add(sim_chunk.get_byte(i) != 0x2b)
+        # to simulate a tracing, the bad bytes constraints should be applied to state here
+        self._bad_bytes = self.identify_bad_bytes(self.crash)
+        for i in range(max_len):
+            for c in self._bad_bytes:
+                state.solver.add(sim_chunk.get_byte(i) != c)
+
         return state
 
     def _get_buffer_size(self, crash):
@@ -260,6 +259,9 @@ class DumbTracer(CrashTracer):
         so it has to use concrete execution to identify the bad bytes through heuristics
         TODO: we can write it in a binary search fashion to properly identify all bad bytes
         """
+        if self._bad_bytes is not None:
+            return self._bad_bytes
+
         self._buffer_size = self._get_buffer_size(crash)
 
         bad_bytes = []

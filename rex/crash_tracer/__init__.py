@@ -32,11 +32,12 @@ add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRET
                so.CONCRETIZE_SYMBOLIC_FILE_READ_SIZES, so.TRACK_MEMORY_ACTIONS, so.KEEP_IP_SYMBOLIC}
 
 class CrashTracer:
-    def __init__(self, tracer_bow=None, angr_project_bow=None, is_cgc=False):
+    def __init__(self, crash, tracer_bow=None, angr_project_bow=None, is_cgc=False):
         """
         :param tracer_bow:          The bow instance to use for tracing operations
         :param angr_project_bow:    The project bow to use, can be used for custom hooks and syscalls
         """
+        self.crash = crash
         self.tracer_bow = tracer_bow
         self.angr_project_bow = angr_project_bow
         self.project = None

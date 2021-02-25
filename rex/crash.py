@@ -343,11 +343,11 @@ class CommCrash(SimCrash):
 
         is_cgc = self.target.target_os == 'cgc'
         if trace_mode == TraceMode.FULL_SYMBOLIC:
-            self.tracer = SimTracer(**tracer_opts, is_cgc=is_cgc)
+            self.tracer = SimTracer(self, **tracer_opts, is_cgc=is_cgc)
         elif trace_mode == TraceMode.HALFWAY:
-            self.tracer = HalfwayTracer(**tracer_opts, is_cgc=is_cgc)
+            self.tracer = HalfwayTracer(self, **tracer_opts, is_cgc=is_cgc)
         elif trace_mode == TraceMode.DUMB:
-            self.tracer = DumbTracer(**tracer_opts, is_cgc=is_cgc)
+            self.tracer = DumbTracer(self, **tracer_opts, is_cgc=is_cgc)
         else:
             raise ValueError("Unknown trace_mode: %s" % trace_mode)
 
@@ -571,7 +571,7 @@ class Crash(CommCrash):
     The highest level crash object, perform analysis on the crash state.
     """
     def __init__(self, target, crash=None, pov_file=None, actions=None,
-                       aslr=None, use_crash_input=False, explore_steps=0, **kwargs):
+                       aslr=None, use_crash_input=True, explore_steps=0, **kwargs):
         """
         :param aslr:                Analyze the crash with aslr on or off.
         :param use_crash_input:     if a byte is not constrained by the generated exploits,

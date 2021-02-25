@@ -16,8 +16,8 @@ from ..enums import CrashInputType
 l = logging.getLogger("rex.HalfwayTracer")
 
 class SimTracer(CrashTracer):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, crash, **kwargs):
+        super().__init__(crash, **kwargs)
 
     def concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, record_magic=self._is_cgc,

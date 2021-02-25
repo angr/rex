@@ -16,8 +16,8 @@ class HalfwayTracer(CrashTracer):
     automatically identify where user input is read and then generate coredump from here
     TODO: it's not automated yet, user needs to specify the trace_addr manually
     """
-    def __init__(self, trace_addr : Union[int, Tuple[int, int]]=None, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, crash, trace_addr : Union[int, Tuple[int, int]]=None, **kwargs):
+        super().__init__(crash, **kwargs)
         self.trace_addr = trace_addr if type(trace_addr) in {type(None), tuple} else (trace_addr, 1)
         self.trace_bb_addr = None
         self.trace_result = None
