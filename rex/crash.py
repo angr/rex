@@ -908,6 +908,7 @@ class Crash(CommCrash):
         cp.actions = self.actions
         cp._rop_cache_path = self._rop_cache_path
         cp.sim_input = self.sim_input
+        cp._bad_bytes = self._bad_bytes
 
         return cp
 
