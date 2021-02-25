@@ -192,7 +192,6 @@ class DumbTracer(CrashTracer):
         l.info("perform bad byte test on byte: %#x...", bad_byte)
 
         word_size = self.project.arch.bytes
-        marker_size = word_size * 3 # the minimal amount of gadgets to be useful
 
         # prepare new input
         inp = bytes([bad_byte])
@@ -266,8 +265,6 @@ class DumbTracer(CrashTracer):
         bad_bytes = []
         for c in [0x00, 0x20, 0x25, 0x2b]:
             ret = self._is_bad_byte(crash, c)
-            while ret is None:
-                ret = self._is_bad_byte(crash, c)
             if ret:
                 l.debug("%#x is a bad byte!", c)
                 bad_bytes.append(c)
