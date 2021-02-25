@@ -944,7 +944,7 @@ class Crash(CommCrash):
         self._triage_crash()
 
         l.info("Identifying bad_bytes")
-        self._bad_bytes = self.tracer.identify_bad_bytes(self.state)
+        self._bad_bytes = self.tracer.identify_bad_bytes(self)
         l.debug("idenfity bad bytes: %s", [hex(x) for x in self._bad_bytes])
 
     def _explore_arbitrary_read(self, path_file=None):
