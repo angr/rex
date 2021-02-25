@@ -868,7 +868,7 @@ class Crash(CommCrash):
                         gap_end = sp + (i + 1) * arch.bytes
 
                 if gap_start is not None and gap_end is not None:
-                    l.warning("Gap around stack poiner is detected. Refining controlled regions.")
+                    l.warning("Gap around stack pointer is detected. Refining controlled regions.")
                     # break the controlled region
                     filtered_control[addr] = gap_start - addr
                     filtered_control[gap_end] = addr + size - gap_end
