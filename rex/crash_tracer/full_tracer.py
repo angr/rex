@@ -19,7 +19,7 @@ class SimTracer(CrashTracer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
+    def concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, record_magic=self._is_cgc,
                                  pre_fire_hook=pre_fire_hook, delay=delay, actions=actions, taint=taint)
         # if a coredump is available, save a copy of all registers in the coredump for future references
@@ -27,12 +27,12 @@ class SimTracer(CrashTracer):
         tiny_core = TinyCore(r.core_path)
         return r, tiny_core.registers
 
-    def _create_project(self, target, **kwargs):
+    def create_project(self, target, **kwargs):
         self._init_angr_project_bow(target)
         self.project = self.angr_project_bow.fire()
         return self.project
 
-    def _create_state(self, target, **kwargs):
+    def create_state(self, target, **kwargs):
         state_bow = archr.arsenal.angrStateBow(target, self.angr_project_bow)
         initial_state = state_bow.fire(
             mode='tracing',
@@ -41,5 +41,5 @@ class SimTracer(CrashTracer):
         )
         return initial_state
 
-    def _bootstrap_state(self, state, **kwargs):
+    def bootstrap_state(self, state, **kwargs):
         return state

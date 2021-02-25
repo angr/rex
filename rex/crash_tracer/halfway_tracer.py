@@ -22,7 +22,7 @@ class HalfwayTracer(CrashTracer):
         self.trace_bb_addr = None
         self.trace_result = None
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
+    def concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         # to enable halfway-tracing, we need to generate a coredump at the wanted address first
         # and use the core dump to create an angr project
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, record_trace=True,
@@ -34,7 +34,7 @@ class HalfwayTracer(CrashTracer):
         self.trace_result = r
         return r, tiny_core.registers
 
-    def _create_project(self, target, **kwargs):
+    def create_project(self, target, **kwargs):
         l.debug("Loading the core dump @ %s into angr...", self.trace_result.core_path)
         self._init_angr_project_bow(target)
         project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
@@ -43,7 +43,7 @@ class HalfwayTracer(CrashTracer):
         self.project = project
         return project
 
-    def _create_state(self, target, **kwargs):
+    def create_state(self, target, **kwargs):
         self.project.loader.main_object = self.project.loader.elfcore_object
         initial_state = self.project.factory.blank_state(
             mode='tracing',
@@ -54,7 +54,7 @@ class HalfwayTracer(CrashTracer):
         initial_state.fs.mount('/', SimArchrMount(target))
         return initial_state
 
-    def _bootstrap_state(self, state, **kwargs):
+    def bootstrap_state(self, state, **kwargs):
         # if we use halfway tracing, we need to reconstruct the sockets
         # as a hack, we trigger the allocation of all sockets
         # FIXME: this should be done properly, maybe let user to provide a hook

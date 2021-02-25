@@ -34,7 +34,7 @@ add_options = {so.MEMORY_SYMBOLIC_BYTES_MAP, so.TRACK_ACTION_HISTORY, so.CONCRET
 class CrashTracer:
     def __init__(self, tracer_bow=None, angr_project_bow=None, is_cgc=False):
         """
-        :param tracer_bow:          (deprecated)The bow instance to use for tracing operations
+        :param tracer_bow:          The bow instance to use for tracing operations
         :param angr_project_bow:    The project bow to use, can be used for custom hooks and syscalls
         """
         self.tracer_bow = tracer_bow
@@ -46,28 +46,28 @@ class CrashTracer:
         self.cgc_flag_page_magic = None
 
     @abstractmethod
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
+    def concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         """
         generate a concrete trace and maybe core dump
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def _create_project(self, target, **kwargs):
+    def create_project(self, target, **kwargs):
         """
         create an angr project
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def _create_state(self, target, **kwargs):
+    def create_state(self, target, **kwargs):
         """
         create an initial angr state for later symbolic tracing
         """
         raise NotImplementedError()
 
     @abstractmethod
-    def _bootstrap_state(self, state, **kwargs):
+    def bootstrap_state(self, state, **kwargs):
         """
         modify the initial angr state for later symbolic tracing
         """
@@ -83,6 +83,28 @@ class CrashTracer:
     @staticmethod
     def _channel_to_input_type(channel):
         return channel.split(":")[0]
+
+    def identify_bad_bytes(self, state):
+        """
+        identify the bad bytes by inspecting constraints in an unconstrained state
+        the extracted bad bytes are used to help angrop filter gadgets
+        """
+        bad_bytes = []
+        sim_bytes = []
+
+        # in case its a partial IP overwrite
+        for i in range(state.project.arch.bytes):
+            byte = state.ip.get_byte(i)
+            if len(state.solver.eval_upto(byte, 2)) == 2:
+                sim_bytes.append(byte)
+
+        # a byte is a bad byte if none of the bytes in
+        # the pc can be that byte
+        for c in range(0x100):
+            if any(state.solver.satisfiable(extra_constraints=[c==x]) for x in sim_bytes):
+                continue
+            bad_bytes.append(c)
+        return bad_bytes
 
 from .full_tracer import SimTracer
 from .halfway_tracer import HalfwayTracer

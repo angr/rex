@@ -51,6 +51,7 @@ class BaseCrash:
         self._rop_fast_mode = fast_mode
         self._rop_cache_path = rop_cache_path
         self._rop_cache = None
+        self._bad_bytes = []
 
     def initialize_rop(self):
         """
@@ -68,7 +69,7 @@ class BaseCrash:
         # finally, create an angrop object
         rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
         # FIXME: stop hardcoding dude...
-        rop.set_badbytes([0x20, 0x25, 0x2b])
+        rop.set_badbytes(self._bad_bytes)
         if self._rop_cache:
             l.info("Loading rop gadgets from cache")
             rop._load_cache_tuple(self._rop_cache[0])
@@ -109,7 +110,7 @@ class BaseCrash:
         project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
         libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
         # FIXME: stop hardcoding dude...
-        libc_rop.set_badbytes([0x00, 0x20, 0x25, 0x2b])
+        libc_rop.set_badbytes(self._bad_bytes)
         if self._rop_cache:
             l.info("Loading libc rop gadgets from cache")
             libc_rop._load_cache_tuple(self._rop_cache[1])
@@ -395,7 +396,7 @@ class CommCrash(SimCrash):
 
         # transform input to channel and test_case
         channel, testcase = self._prepare_channel()
-        self.trace_result, self.core_registers = self.tracer._concrete_trace(testcase, channel,
+        self.trace_result, self.core_registers = self.tracer.concrete_trace(testcase, channel,
                                                                              self.pre_fire_hook,
                                                                              delay=self.delay,
                                                                              actions=self.actions,
@@ -462,7 +463,7 @@ class CommCrash(SimCrash):
         """
         # Initialize an angr Project
 
-        self.project = self.tracer._create_project(self.target)
+        self.project = self.tracer.create_project(self.target)
 
     def _create_initial_state(self, testcase, cgc_flag_page_magic=None):
 
@@ -491,7 +492,7 @@ class CommCrash(SimCrash):
             )
 
         # if we already have a core dump, use it to create the initial state
-        initial_state = self.tracer._create_state(self.target)
+        initial_state = self.tracer.create_state(self.target)
 
         posix = SimSystemPosix(
             stdin=stdin_file,
@@ -517,7 +518,7 @@ class CommCrash(SimCrash):
         initial_state.libc.max_str_len = 3000
         initial_state.libc.max_buffer_size = 16384
 
-        initial_state = self.tracer._bootstrap_state(initial_state)
+        initial_state = self.tracer.bootstrap_state(initial_state)
 
         return initial_state
 
@@ -941,6 +942,10 @@ class Crash(CommCrash):
 
         l.info("Triaging the crash.")
         self._triage_crash()
+
+        l.info("Identifying bad_bytes")
+        self._bad_bytes = self.tracer.identify_bad_bytes(self.state)
+        l.debug("idenfity bad bytes: %s", [hex(x) for x in self._bad_bytes])
 
     def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a

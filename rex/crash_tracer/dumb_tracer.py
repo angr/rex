@@ -36,7 +36,7 @@ class DumbTracer(CrashTracer):
         crash_addr = r.trace[-1]
         return crash_addr, r.trace.count(crash_addr)
 
-    def _concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
+    def concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         """
         identify the crash location and then generate a coredump before crashing
         """
@@ -56,7 +56,7 @@ class DumbTracer(CrashTracer):
         tiny_core = TinyCore(r.core_path)
         return r, tiny_core.registers
 
-    def _create_project(self, target, **kwargs):
+    def create_project(self, target, **kwargs):
         l.debug("Loading the core dump @ %s into angr...", self.trace_result.core_path)
         self._init_angr_project_bow(target)
         project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
@@ -65,7 +65,7 @@ class DumbTracer(CrashTracer):
         self.project = project
         return project
 
-    def _create_state(self, target, **kwargs):
+    def create_state(self, target, **kwargs):
         self.project.loader.main_object = self.project.loader.elfcore_object
         initial_state = self.project.factory.blank_state(
             mode='tracing',
@@ -75,7 +75,7 @@ class DumbTracer(CrashTracer):
         initial_state.fs.mount('/', SimArchrMount(target))
         return initial_state
 
-    def _bootstrap_state(self, state, **kwargs):
+    def bootstrap_state(self, state, **kwargs):
         """
         perform analysis to input-state correspondence and then add the constraints in the state
         """
@@ -137,3 +137,6 @@ class DumbTracer(CrashTracer):
             state.solver.add(sim_chunk.get_byte(i) != 0x25)
             state.solver.add(sim_chunk.get_byte(i) != 0x2b)
         return state
+
+    def identify_bad_bytes(self, state):
+        return []
