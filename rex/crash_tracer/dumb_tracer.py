@@ -40,6 +40,7 @@ class DumbTracer(CrashTracer):
         self._initial_state = None
         self._buffer_size = None
         self._bad_bytes = None
+        self._save_ip_addr = None
 
     def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
         """
@@ -52,40 +53,19 @@ class DumbTracer(CrashTracer):
         if not r.crashed:
             raise CrashTracerError("The target is not crashed inside QEMU!")
         crash_block_addr = r.trace[-1]
-
-        # if the crash_address is within the crashing block, the crashing instruction is the crash address.
-        # otherwise, it's very likely that the last branch/return instruction uses corrupted branch/return target, in
-        # which case we mare the last instruction as the crashing instruction.
-        self._init_angr_project_bow(self.tracer_bow.target)
-        proj: 'Project' = self.angr_project_bow.fire()
-        crash_block = proj.factory.block(crash_block_addr)
-        if r.crash_address in crash_block.instruction_addrs:
-            crash_insn_addr = r.crash_address
-        else:
-            if not crash_block.instruction_addrs:
-                raise CrashTracerError("Unexpected situation: The last traced block does not have any instructions.")
-            if proj.arch.branch_delay_slot and len(crash_block.instruction_addrs > 1):
-                crash_insn_addr = crash_block.instruction_addrs[-2]
-            else:
-                crash_insn_addr = crash_block.instruction_addrs[-1]
-
-        # Hack: we only need this project once, so let's destroy the initialized project bow and the project
-        self.angr_project_bow.project = None
-        self.angr_project_bow = None
-
-        return crash_block_addr, r.trace.count(crash_block_addr), crash_insn_addr
+        return crash_block_addr, r.trace.count(crash_block_addr)
 
     def concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         """
         identify the crash location and then generate a coredump before crashing
         """
-        crash_block_addr, times, self.crash_addr = self._identify_crash_addr(testcase, channel, pre_fire_hook,
+        self.crash_addr, times = self._identify_crash_addr(testcase, channel, pre_fire_hook,
                                                                              delay=delay, actions=actions)
         self.crash_addr_times = times
         l.info("DumbTracer identified the crash_addr @ %#x:%d", self.crash_addr, times)
 
         r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay,
-                                 trace_bb_addr=(crash_block_addr, times), crash_addr=(self.crash_addr, times),
+                                 trace_bb_addr=(self.crash_addr, times), crash_addr=(self.crash_addr, times),
                                  pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions, taint=taint)
         self.trace_result = r
         self.testcase = testcase
@@ -116,30 +96,60 @@ class DumbTracer(CrashTracer):
         self._initial_state = initial_state.copy()
         return initial_state
 
-    def bootstrap_state(self, state, **kwargs):
+    def _get_saved_ip_addr(self, state):
         """
-        perform analysis to input-state correspondence and then add the constraints in the state
+        input state is at the basic block moving input to ip
         """
 
-        # if we are not at the crashing address yet, step the state symbolically until it reaches there
-        if state.addr != self.crash_addr:
-            block = self.project.factory.block(state.addr)
-            if self.crash_addr not in block.instruction_addrs:
-                raise CrashTracerError("Unexpected: The crashing address does not exist in the crashing block.")
-            block_size = self.crash_addr - state.addr
-            simgr = self.project.factory.simgr(state)
-            simgr.step(size=block_size)
-            assert len(simgr.active) == 1  # no branching should have happened
-            # take the state at the crashing instruction
-            crashing_state = simgr.active[0]
-        else:
-            crashing_state = state
+        # step once
+        simgr = self.project.factory.simgr(state.copy())
+        simgr.step()
+        assert len(simgr.active) == 1
+        crashing_state = simgr.active[0]
+
+        # identify the addresses that this block reads
+        read_addr_bvs = []
+        for act in crashing_state.history.actions:
+            if act.type == 'mem' and act.action == 'read':
+                read_addr_bvs.append(act.addr.ast)
+
+        # insert symbolic values to the addresses and identify saved_ip_addr
+        # just in case the value loaded to ip is not unique in those reads
+        init_state = state.copy()
+        sim_words = [claripy.BVS('taint_word', self.project.arch.bits) for _ in read_addr_bvs]
+        for idx in range(len(read_addr_bvs)):
+            init_state.memory.store(read_addr_bvs[idx], sim_words[idx])
+
+        # step from the tainted state once
+        simgr = self.project.factory.simgr(init_state, save_unconstrained=True)
+        simgr.step()
+        assert len(simgr.unconstrained) == 1
+        crashing_state = simgr.unconstrained[0]
+
+        # identify the saved ip addr
+        sim_ip = crashing_state.ip
+        idx = None
+        for idx, x in enumerate(sim_words):
+            if list(x.variables)[0] == list(sim_ip.variables)[0]:
+                break
+        if not idx:
+            raise RuntimeError("WTF? the block at @ %#x does not load IP?" % self.crash_addr)
+        return crashing_state.solver.eval(read_addr_bvs[idx])
+
+    def bootstrap_state(self, state, **kwargs):
+        """
+        perform analysis to find input-state correspondence and then add the constraints in the state
+        """
+
+        self._save_ip_addr = self._get_saved_ip_addr(state)
+
+        crashing_state = state
 
         word_size = self.project.arch.bytes
         marker_size = word_size * 3 # the minimal amount of gadgets to be useful
 
         # we operate on concrete memory so far, so it is safe to load and eval concrete memory
-        data = crashing_state.solver.eval(crashing_state.memory.load(crashing_state.regs._sp, 0x400), cast_to=bytes)
+        data = crashing_state.solver.eval(crashing_state.memory.load(self._save_ip_addr, 0x100), cast_to=bytes)
 
         # identify marker from the original input on stack
         for i in range(0, len(data), marker_size):
@@ -148,21 +158,22 @@ class DumbTracer(CrashTracer):
                 break
         else:
             raise CrashTracerError("Fail to identify marker from the original input")
-        input_addr = crashing_state.regs._sp + i
+        input_addr = self._save_ip_addr + i
         marker_idx = self.testcase.index(marker)
         assert self.testcase.count(marker) == 1, "The input should have high entropy, cyclic is recommended"
 
         # search for the max length of the controlled data
-        input_addr_val = crashing_state.solver.eval(input_addr)
-        obj = crashing_state.project.loader.find_object_containing(input_addr_val)
-        max_buffer_size = min(obj.max_addr - input_addr_val, len(self.testcase))
+        input_addr = crashing_state.solver.eval(input_addr)
+        obj = crashing_state.project.loader.find_object_containing(input_addr)
+        max_buffer_size = min(obj.max_addr - input_addr, len(self.testcase))
         data = crashing_state.solver.eval(crashing_state.memory.load(input_addr, max_buffer_size), cast_to=bytes)
         assert data[:marker_size] == self.testcase[marker_idx:marker_idx+marker_size]
         for max_len in range(marker_size, len(data), word_size):
             if data[:max_len] != self.testcase[marker_idx:marker_idx+max_len]:
                 max_len -= word_size
                 break
-        self._input_addr = input_addr_val
+
+        self._input_addr = input_addr
         self._max_len = max_len
         self._marker_idx = marker_idx
 
@@ -206,6 +217,7 @@ class DumbTracer(CrashTracer):
         state = self._initial_state.copy()
         state.memory.store(self._input_addr, taint)
         succ = state.step().all_successors[0]
+        assert succ.ip.symbolic, "input identification is wrong! the ip is not overwritten!"
 
         if self.project.arch.memory_endness == 'Iend_LE':
             guard_idx = self.project.arch.bytes - 1
