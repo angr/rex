@@ -814,6 +814,32 @@ class Crash(CommCrash):
 
         return control
 
+    def libc_memory_control(self):
+        """
+        determine what symbolic memory we control which is at a constant address in libc if libc_rop is enabled
+
+        TODO: be able to specify that we want to know about things relative to a certain address
+
+        :return:        A mapping from address to length of data controlled at that address
+        """
+
+        control = { }
+
+        if self.aslr or self.libc_rop is None:
+            return control
+
+        # PIE binaries will give no global control without knowledge of the binary base
+        if self.aslr and self.libc_rop.project.loader.main_object.pic: # unless aslr is off, we're shit out of luck
+            return control
+
+        min_addr = self.libc_rop.project.loader.main_object.min_addr
+        max_addr = self.libc_rop.project.loader.main_object.max_addr
+        for addr in self.symbolic_mem:
+            if min_addr <= addr < max_addr:
+                control[addr] = self.symbolic_mem[addr]
+
+        return control
+
     def stack_control(self, below_sp=True):
         """
         determine what symbolic memory we control on the stack.
