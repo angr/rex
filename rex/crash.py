@@ -79,7 +79,7 @@ class BaseCrash:
             if angr.misc.testing.is_testing:
                 rop.find_gadgets_single_threaded(show_progress=False)
             else:
-                rop.find_gadgets(show_progress=False)
+                rop.find_gadgets(show_progress=True)
         self.rop = rop
 
     def _identify_libc(self):
@@ -120,7 +120,7 @@ class BaseCrash:
             if angr.misc.testing.is_testing:
                 libc_rop.find_gadgets_single_threaded(show_progress=False)
             else:
-                libc_rop.find_gadgets(show_progress=False)
+                libc_rop.find_gadgets(show_progress=True)
         self.libc_rop = libc_rop
 
     def soft_load_cache(self):
