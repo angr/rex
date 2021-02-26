@@ -56,6 +56,9 @@ def force_kill(r):
 def script2rexactions(script_path, ip="127.0.0.1", port=8000, VERBOSE=False):
     assert os.path.isfile(script_path), f"{script_path} does not exist."
 
+    if not script_path[0] == os.path.sep:
+        script_path = "./" + script_path
+
     r = nclib.Process(["nc", "-l", ip, str(port)], verbose=VERBOSE)
     p = nclib.Process([script_path, ip, str(port)],
                       env={
