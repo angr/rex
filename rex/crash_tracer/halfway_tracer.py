@@ -35,9 +35,9 @@ class HalfwayTracer(CrashTracer):
         return r, tiny_core.registers
 
     def create_project(self, target, **kwargs):
-        l.debug("Loading the core dump @ %s into angr...", self.trace_result.core_path)
+        l.debug("Loading the halfway core dump @ %s into angr...", self.trace_result.halfway_core_path)
         self._init_angr_project_bow(target)
-        project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
+        project = self.angr_project_bow.fire(core_path=self.trace_result.halfway_core_path)
 
         project.loader.main_object = project.loader.elfcore_object._main_object
         self.project = project
