@@ -72,8 +72,8 @@ class DumbTracer(CrashTracer):
         self.channel = channel
 
         # if a coredump is available, save a copy of all registers in the coredump for future references
-        assert r.halfway_core_path and os.path.isfile(r.halfway_core_path)
-        tiny_core = TinyCore(r.halfway_core_path)
+        assert r.core_path and os.path.isfile(r.core_path)
+        tiny_core = TinyCore(r.core_path)
         return r, tiny_core.registers
 
     def create_project(self, target, **kwargs):
@@ -289,6 +289,7 @@ class DumbTracer(CrashTracer):
         try:
             r = self.tracer_bow.fire(testcase=None, channel=channel, delay=crash.delay, save_core=True,
                                      trace_bb_addr=(self.crash_addr, self.crash_addr_times),
+                                     crash_addr=(self.crash_addr, self.crash_addr_times),
                                      pre_fire_hook=crash.pre_fire_hook, record_trace=True, actions=new_actions)
         except archr.errors.ArchrError:
             # if the binary never reaches the crash address, the byte is a bad byte
@@ -298,7 +299,7 @@ class DumbTracer(CrashTracer):
 
         dsb = archr.arsenal.DataScoutBow(crash.target, analyzer=self.tracer_bow)
         angr_project_bow = archr.arsenal.angrProjectBow(crash.target, dsb)
-        project = angr_project_bow.fire(core_path=r.core_path)
+        project = angr_project_bow.fire(core_path=r.halfway_core_path)
         project.loader.main_object = project.loader.elfcore_object._main_object
 
         # if the new actions have the same behavior as before, that means there are
