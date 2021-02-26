@@ -298,7 +298,7 @@ class DumbTracer(CrashTracer):
 
         dsb = archr.arsenal.DataScoutBow(crash.target, analyzer=self.tracer_bow)
         angr_project_bow = archr.arsenal.angrProjectBow(crash.target, dsb)
-        project = angr_project_bow.fire(core_path=r.halfway_core_path)
+        project = angr_project_bow.fire(core_path=r.core_path)
         project.loader.main_object = project.loader.elfcore_object._main_object
 
         # if the new actions have the same behavior as before, that means there are
