@@ -288,8 +288,8 @@ class DumbTracer(CrashTracer):
         channel, _ = crash._prepare_channel()
         try:
             r = self.tracer_bow.fire(testcase=None, channel=channel, delay=crash.delay, save_core=True,
-                                     trace_bb_addr=(self.crash_addr, self.crash_addr_times),
                                      crash_addr=(self.crash_addr, self.crash_addr_times),
+                                     trace_bb_addr=(self.crash_addr, self.crash_addr_times),
                                      pre_fire_hook=crash.pre_fire_hook, record_trace=True, actions=new_actions)
         except archr.errors.ArchrError:
             # if the binary never reaches the crash address, the byte is a bad byte
