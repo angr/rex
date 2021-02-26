@@ -109,7 +109,6 @@ class BaseCrash:
         bin_opts = {"base_addr": base_addr}
         project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
         libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
-        # FIXME: stop hardcoding dude...
         libc_rop.set_badbytes(self._bad_bytes)
         if self._rop_cache:
             l.info("Loading libc rop gadgets from cache")

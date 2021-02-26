@@ -234,11 +234,17 @@ class DumbTracer(CrashTracer):
             return False
 
         # whether there is any sliding because of input transformation
-        mem = project.loader.memory.load(self._input_addr+self._buffer_size, len(taint_str))
+        end_addr = self._input_addr + self._max_len
+        mem = project.loader.memory.load(end_addr - len(taint_str), len(taint_str))
         if mem != taint_str:
             return False
 
         return True
+
+    @staticmethod
+    def _replace_bytes(data, idx, new):
+        assert len(new) + idx <= len(data)
+        return data[:idx] + new + data[idx+len(new):]
 
     def _is_bad_byte(self, crash, bad_byte):
         l.info("perform bad byte test on byte: %#x...", bad_byte)
@@ -246,7 +252,7 @@ class DumbTracer(CrashTracer):
         word_size = self.project.arch.bytes
 
         # prepare new input
-        inp = bytes([bad_byte])
+        inp = bytes([bad_byte]*(self._max_len - (self._save_ip_addr - self._input_addr)))
 
         # prepare new actions
         new_actions = []
@@ -267,20 +273,15 @@ class DumbTracer(CrashTracer):
             # we assume the overflow happens inside one send
             assert marker_offset + self._buffer_size + self.project.arch.bytes <= len(act.data)
 
-            # replace the byte several bytes before the input that affects pc
-            # this location is usually not processed
-            header = act.data[:marker_offset+self._buffer_size-word_size]
-            footer = act.data[marker_offset+self._buffer_size-word_size+len(inp):]
-            new_data = header + inp + footer
-            act.data = new_data
+            # replace several bytes before the end of the controlled region
+            end_offset = marker_offset + self._max_len
+            saved_ip_offset = marker_offset + self._buffer_size
+            act.data = self._replace_bytes(act.data, saved_ip_offset, inp)
 
             # replace where ip should be with a taint, if there is no bad byte,
             # it should be found at a known address
             taint_str = b'\xef\xbe\xad\xde\xbe\xba\xfe\xca'
-            header = act.data[:marker_offset+self._buffer_size]
-            footer = act.data[marker_offset+self._buffer_size+self.project.arch.bytes:]
-            new_data = header + taint_str + footer
-            act.data = new_data
+            act.data = self._replace_bytes(act.data, end_offset-8, taint_str)
 
         # now interact with the target using new input. If there are any bad byte
         # in the input, the target won't crash at the same location or don't crash at all
@@ -318,7 +319,7 @@ class DumbTracer(CrashTracer):
         self._buffer_size = self._get_buffer_size(crash)
 
         bad_bytes = []
-        for c in [0x00, 0x20, 0x25, 0x2b]:
+        for c in [0x00, 0x20, 0x25, 0x2b, 0x2d]:
             ret = self._is_bad_byte(crash, c)
             if ret:
                 l.debug("%#x is a bad byte!", c)
