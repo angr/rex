@@ -72,14 +72,14 @@ class DumbTracer(CrashTracer):
         self.channel = channel
 
         # if a coredump is available, save a copy of all registers in the coredump for future references
-        assert r.core_path and os.path.isfile(r.core_path)
-        tiny_core = TinyCore(r.core_path)
+        assert r.halfway_core_path and os.path.isfile(r.halfway_core_path)
+        tiny_core = TinyCore(r.halfway_core_path)
         return r, tiny_core.registers
 
     def create_project(self, target, **kwargs):
-        l.debug("Loading the core dump @ %s into angr...", self.trace_result.core_path)
+        l.debug("Loading the core dump @ %s into angr...", self.trace_result.halfway_core_path)
         self._init_angr_project_bow(target)
-        project = self.angr_project_bow.fire(core_path=self.trace_result.core_path)
+        project = self.angr_project_bow.fire(core_path=self.trace_result.halfway_core_path)
 
         project.loader.main_object = project.loader.elfcore_object._main_object
         self.project = project
@@ -298,7 +298,7 @@ class DumbTracer(CrashTracer):
 
         dsb = archr.arsenal.DataScoutBow(crash.target, analyzer=self.tracer_bow)
         angr_project_bow = archr.arsenal.angrProjectBow(crash.target, dsb)
-        project = angr_project_bow.fire(core_path=r.core_path)
+        project = angr_project_bow.fire(core_path=r.halfway_core_path)
         project.loader.main_object = project.loader.elfcore_object._main_object
 
         # if the new actions have the same behavior as before, that means there are
