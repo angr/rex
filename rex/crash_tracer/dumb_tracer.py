@@ -226,7 +226,7 @@ class DumbTracer(CrashTracer):
         for idx, x in enumerate(sim_words):
             if list(x.variables)[0] == list(sim_ip.variables)[0]:
                 break
-        if not idx:
+        if idx is None:
             raise RuntimeError("WTF? the block at @ %#x does not load IP?" % self.crash_addr)
         addr= crashing_state.solver.eval(read_addr_bvs[idx])
         l.debug("identify saved ip addr @ %#x", addr)
