@@ -254,24 +254,52 @@ class DumbTracer(CrashTracer):
                 break
         else:
             raise CrashTracerError("Fail to identify marker from the original input")
-        input_addr = self._save_ip_addr + i
+
         marker_idx = self.testcase.index(marker)
         assert self.testcase.count(marker) == 1, "The input should have high entropy, cyclic is recommended"
 
-        # search for the max length of the controlled data
-        input_addr = crashing_state.solver.eval(input_addr)
-        obj = crashing_state.project.loader.find_object_containing(input_addr)
-        max_buffer_size = min(obj.max_addr - input_addr, len(self.testcase))
-        data = crashing_state.solver.eval(crashing_state.memory.load(input_addr, max_buffer_size), cast_to=bytes)
-        assert data[:marker_size] == self.testcase[marker_idx:marker_idx+marker_size]
-        for max_len in range(marker_size, len(data), word_size):
-            if data[:max_len] != self.testcase[marker_idx:marker_idx+max_len]:
-                max_len -= word_size
-                break
+        #
+        # we search forward and backward from `search_start` to find the maximum number of bytes that we control
+        #
+        search_start = self._save_ip_addr + i
+        search_start = crashing_state.solver.eval(search_start)
+        obj = crashing_state.project.loader.find_object_containing(search_start)
 
-        self._input_addr = input_addr
-        self._max_len = max_len
-        self._marker_idx = marker_idx
+        # search forward to determine the maximum length of controlled data
+        max_buffer_size = min(obj.max_addr - search_start, len(self.testcase) - marker_idx)
+        data = crashing_state.solver.eval(crashing_state.memory.load(search_start, max_buffer_size), cast_to=bytes)
+        assert data[:marker_size] == self.testcase[marker_idx:marker_idx+marker_size]
+        for i in range(marker_size, len(data), word_size):
+            if data[:i] != self.testcase[marker_idx:marker_idx+i]:
+                max_len_forward = i - word_size
+                break
+        else:
+            max_len_forward = len(data)
+
+        # search backward to determine the maximum length of controlled data
+        max_backward_buffer_size = min(search_start - obj.min_addr, marker_idx)
+        data = crashing_state.solver.eval(
+            crashing_state.memory.load(search_start - max_backward_buffer_size, max_backward_buffer_size),
+            cast_to=bytes,
+        )
+        for i in range(word_size, len(data), word_size):
+            if data[-i:] != self.testcase[marker_idx - i : marker_idx]:
+                max_len_backward = i - word_size
+                break
+        else:
+            max_len_backward = len(data)
+
+        # search complete!
+        self._input_addr = search_start - max_len_backward
+        self._max_len = max_len_backward + max_len_forward
+        self._marker_idx = marker_idx - max_len_backward
+
+        l.debug("Input is at %#x in memory. We control at most %d bytes. The controllable chunk starts at offset "
+                "%d in the given test case.",
+                self._input_addr,
+                self._max_len,
+                self._marker_idx,
+                )
 
         # only support network input at the moment
         input_type = self._channel_to_input_type(self.channel)
@@ -292,15 +320,15 @@ class DumbTracer(CrashTracer):
         simfd.read_data(len(self.testcase))
 
         # compute where to patch
-        concrete_str = state.solver.eval(state.memory.load(input_addr, max_len), cast_to=bytes)
+        concrete_str = state.solver.eval(state.memory.load(self._input_addr, self._max_len), cast_to=bytes)
         patches = []
         for patch_str in self._patch_strs:
-            addrs = [ input_addr+i for i in range(max_len) if concrete_str[i:i+len(patch_str)] == patch_str]
+            addrs = [self._input_addr+i for i in range(self._max_len) if concrete_str[i:i+len(patch_str)] == patch_str]
             patches += list(zip(addrs, [patch_str]*len(addrs)))
 
         # replace concrete input with symbolic input for the socket
-        sim_chunk = simfd.read_storage.load(marker_idx, max_len)
-        state.memory.store(input_addr, sim_chunk)
+        sim_chunk = simfd.read_storage.load(self._marker_idx, self._max_len)
+        state.memory.store(self._input_addr, sim_chunk)
 
         # apply patches
         for addr, patch_str in patches:
@@ -308,7 +336,7 @@ class DumbTracer(CrashTracer):
 
         # to simulate a tracing, the bad bytes constraints should be applied to state here
         self._bad_bytes = self.identify_bad_bytes(self.crash)
-        for i in range(max_len):
+        for i in range(self._max_len):
             for c in self._bad_bytes:
                 state.solver.add(sim_chunk.get_byte(i) != c)
 
