@@ -228,7 +228,7 @@ class DumbTracer(CrashTracer):
         buffer_size = byte_name_list.index(list(guard_byte.variables)[0])
         return buffer_size
 
-    def _same_behavior(self, trace_result, project, taint_str):
+    def _same_behavior(self, trace_result, project, taint_str, byte_under_test):
         # whether the process continues execution after the crash point
         if len(trace_result.trace) > 1:
             return False
@@ -239,6 +239,9 @@ class DumbTracer(CrashTracer):
         if mem != taint_str:
             return False
 
+        should_be_byte = project.loader.memory.load(end_addr-len(taint_str)-1, 1)[0]
+        if should_be_byte != byte_under_test:
+            return False
         return True
 
     @staticmethod
@@ -302,7 +305,7 @@ class DumbTracer(CrashTracer):
 
         # if the new actions have the same behavior as before, that means there are
         # no bad bytes in it
-        if self._same_behavior(r, project, taint_str):
+        if self._same_behavior(r, project, taint_str, bad_byte):
             return False
         return True
 
