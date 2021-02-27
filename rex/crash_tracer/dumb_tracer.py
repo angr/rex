@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 l = logging.getLogger("rex.DumbTracer")
 
+DANGEROUS_BYTES = [0x00, 0x20, 0x25, 0x2b, 0x2d]
 class DumbTracer(CrashTracer):
     """
     generate a coredump 1 block before crashing, identify the crash input
@@ -42,16 +43,98 @@ class DumbTracer(CrashTracer):
         self._bad_bytes = None
         self._save_ip_addr = None
 
-    def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0, actions=None):
+        self._fix_data = []
+
+    def _investigate_crash(self, r, testcase, channel, pre_fire_hook, delay=0, actions=None):
+        l.info("investigating crash @ %#x", r.crash_address)
+
+        # create a project
+        self._init_angr_project_bow(self.tracer_bow.target)
+        project = self.angr_project_bow.fire(core_path=r.core_path)
+        project.loader.main_object = project.loader.elfcore_object
+        state = project.factory.blank_state(
+            mode='tracing',
+            add_options=add_options
+            )
+
+        # step 1 single instruction which is the crashing instruction
+        block = state.block()
+        insn = block.capstone.insns[0]
+        insn_end = block.addr + insn.insn.size
+        simgr = project.factory.simgr(state)
+        simgr.step(extra_stop_points=[insn_end])
+        assert len(simgr.active) == 1
+        crashing_state = simgr.active[0]
+
+        # extracting info about the crashing memory access
+        for act in crashing_state.history.actions:
+            if act.type == 'mem':
+                break
+        else:
+            raise CrashTracerError("There is no memory access in the last instruction" +
+                                   "why does it crash?")
+        bad_ptr = act.addr.ast
+        bad_data = state.solver.eval(bad_ptr, cast_to=bytes)
+
+        # find an address in rw region with no dangerous bytes
+        addr_str = None
+        sim_addr = claripy.BVS("addr", project.arch.bytes*8)
+        for obj in project.loader.all_elf_objects:
+            for seg in obj.segments:
+                if not seg.is_readable or not seg.is_writable:
+                    continue
+                st = state.copy()
+                st.add_constraints(sim_addr >= seg.min_addr)
+                st.add_constraints(sim_addr < seg.max_addr)
+                for c in DANGEROUS_BYTES:
+                    for i in range(project.arch.bytes):
+                        st.add_constraints(sim_addr.get_byte(i) != c)
+                if st.satisfiable():
+                    addr_str = st.solver.eval(sim_addr, cast_to=bytes)
+                if addr_str:
+                    break
+            if addr_str:
+                break
+        else:
+            raise CrashTracerError("Fail to find a pointer to rw region")
+
+        # fix pointer strings
+        if project.arch.memory_endness == 'Iend_LE':
+            addr_str = addr_str[::-1]
+            bad_data = bad_data[::-1]
+
+        # fix the data with a valid known pointer to rw region
+        self._fix_data.append(addr_str)
+        for act in self.crash.actions:
+            if type(act) != RexSendAction:
+                continue
+            act.data = act.data.replace(bad_data, addr_str)
+        self.crash._input_preparation(None, self.crash.actions, self.crash.input_type)
+
+        # Hack: we only need this project once, so let's destroy the initialized project bow and the project
+        self.angr_project_bow.project = None
+        self.angr_project_bow = None
+
+        return self._identify_crash_addr(testcase, channel, pre_fire_hook,
+                                         delay=delay, actions=self.crash.actions, investigate=False)
+
+    def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0, actions=None, investigate=True):
         """
         run the target once to identify crash_addr
         """
         # let's just be safe, recording a full trace takes a lot of time
-        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=False, delay=delay+15,
+        r = self.tracer_bow.fire(testcase=testcase, channel=channel, save_core=True, delay=delay+15,
                                  pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions,
                                  record_magic=self._is_cgc)
         if not r.crashed:
             raise CrashTracerError("The target is not crashed inside QEMU!")
+
+        # the target crashes at memory accessing
+        if r.crash_address in r.trace:
+            if investigate:
+                return self._investigate_crash(r, testcase, channel, pre_fire_hook, delay=delay, actions=actions)
+            raise CrashTracerError("Not an IP control vulnerability!")
+
         crash_block_addr = r.trace[-1]
         return crash_block_addr, r.trace.count(crash_block_addr)
 
@@ -123,7 +206,7 @@ class DumbTracer(CrashTracer):
         # step from the tainted state once
         simgr = self.project.factory.simgr(init_state, save_unconstrained=True)
         simgr.step()
-        assert len(simgr.unconstrained) == 1
+        assert len(simgr.unconstrained) == 1, "Do not control IP, panicking!"
         crashing_state = simgr.unconstrained[0]
 
         # identify the saved ip addr
@@ -321,7 +404,7 @@ class DumbTracer(CrashTracer):
         self._buffer_size = self._get_buffer_size(crash)
 
         bad_bytes = []
-        for c in [0x00, 0x20, 0x25, 0x2b, 0x2d]:
+        for c in DANGEROUS_BYTES:
             ret = self._is_bad_byte(crash, c)
             if ret:
                 l.debug("%#x is a bad byte!", c)
