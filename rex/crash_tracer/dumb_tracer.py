@@ -242,7 +242,7 @@ class DumbTracer(CrashTracer):
         crashing_state = state
 
         word_size = self.project.arch.bytes
-        marker_size = word_size * 3 # the minimal amount of gadgets to be useful
+        marker_size = word_size
 
         # we operate on concrete memory so far, so it is safe to load and eval concrete memory
         data = crashing_state.solver.eval(crashing_state.memory.load(self._save_ip_addr, 0x100), cast_to=bytes)
