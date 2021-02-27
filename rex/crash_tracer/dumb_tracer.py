@@ -1,7 +1,9 @@
 import os
 import copy
+import re
+import struct
 import logging
-from typing import TYPE_CHECKING
+from typing import List, Tuple, TYPE_CHECKING
 
 import nclib
 import archr
@@ -22,6 +24,8 @@ if TYPE_CHECKING:
 l = logging.getLogger("rex.DumbTracer")
 
 DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x2b, 0x2d, 0x3b]
+
+
 class DumbTracer(CrashTracer):
     """
     generate a coredump 1 block before crashing, identify the crash input
@@ -130,6 +134,37 @@ class DumbTracer(CrashTracer):
         return self._identify_crash_addr(testcase, channel, pre_fire_hook,
                                          delay=delay, actions=self.crash.actions, investigate=False)
 
+    def _fixate_pointers(self, r):
+
+        self._init_angr_project_bow(self.tracer_bow.target)
+        project = self.angr_project_bow.fire(core_path=r.core_path)
+        project.loader.main_object = project.loader.elfcore_object
+
+        # MIPS-specific hack:
+        # In certain MIPS binaries, the arguments are not copied to the stack frame of the current function and are
+        # directly used in the current function. Hence, as soon as we overflow past the stored return address on the
+        # stack, we start overflowing these arguments. If any of these arguments are used between the overflowing point
+        # and the returning point, corrupted arguments may lead the program to crash.
+        # Hence, this hack finds out about pointers in the user input after the controlled location, and then keep
+        # these pointers unchanged.
+        if project.arch.name == "MIPS32":
+            struct_fmt = project.arch.struct_fmt()
+            for act in iter(a_ for a_ in self.crash.actions if isinstance(a_, RexSendAction)):
+                for i in range(0, len(act.data)):
+                    chopped = act.data[i : i + project.arch.bytes]
+                    if len(chopped) != project.arch.bytes:
+                        continue
+                    chopped_v = struct.unpack(struct_fmt, chopped)[0]
+                    if project.loader.find_object_containing(chopped_v):
+                        # found a pointer!
+                        if chopped_v not in self._patch_strs:
+                            l.debug("Found a pointer in the input to keep untouched: %#x.", chopped_v)
+                            self._patch_strs.append(chopped)
+
+        # destroy the temporary project bow and the project
+        self.angr_project_bow.project = None
+        self.angr_project_bow = None
+
     def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0, actions=None, investigate=True):
         """
         run the target once to identify crash_addr
@@ -146,6 +181,8 @@ class DumbTracer(CrashTracer):
             if investigate:
                 return self._investigate_crash(r, testcase, channel, pre_fire_hook, delay=delay, actions=actions)
             raise CrashTracerError("Not an IP control vulnerability!")
+
+        self._fixate_pointers(r)
 
         crash_block_addr = r.trace[-1]
         return crash_block_addr, r.trace.count(crash_block_addr)
@@ -410,6 +447,12 @@ class DumbTracer(CrashTracer):
             # we assume the overflow happens inside one send
             assert marker_offset + self._buffer_size + self.project.arch.bytes <= len(act.data)
 
+            # find all previously identified byte chunks that should not be touched
+            patchstr_and_offset: List[Tuple[int,bytes]] = [ ]
+            for patch_str in self._patch_strs:
+                offsets = [ m.start() for m in re.finditer(patch_str, act.data) ]
+                patchstr_and_offset += [ (off, patch_str) for off in offsets ]
+
             # replace several bytes before the end of the controlled region
             end_offset = marker_offset + self._max_len
             saved_ip_offset = marker_offset + self._buffer_size
@@ -418,6 +461,10 @@ class DumbTracer(CrashTracer):
             # replace where ip should be with a taint, if there is no bad byte,
             # it should be found at a known address
             act.data = self._replace_bytes(act.data, end_offset-8, taint_str)
+
+            # patch back the byte chunks that should not be touched!
+            for off, patch_str in patchstr_and_offset:
+                act.data = self._replace_bytes(act.data, off, patch_str)
 
         # now interact with the target using new input. If there are any bad byte
         # in the input, the target won't crash at the same location or don't crash at all
