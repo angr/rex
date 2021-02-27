@@ -233,9 +233,6 @@ class DumbTracer(CrashTracer):
         if len(trace_result.trace) > 1:
             return False
 
-        if self.trace_result.crash_address != trace_result.crash_address:
-            return False
-
         # whether there is any sliding because of input transformation
         end_addr = self._input_addr + self._max_len
         mem = project.loader.memory.load(end_addr - len(taint_str), len(taint_str))
