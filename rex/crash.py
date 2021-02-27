@@ -539,9 +539,8 @@ class CommCrash(SimCrash):
             test_case = TracerPoV(self.pov_file)
             channel = None
         else:
-            input_data = self.crash_input
+            test_case = self.crash_input
             channel = self.input_type_to_channel(self.input_type)
-            test_case = input_data
         self._channel = channel
         self._test_case = test_case
         return channel, test_case

@@ -32,7 +32,6 @@ class DumbTracer(CrashTracer):
         self.trace_result = None
         self.crash_addr = None
         self.crash_addr_times = None
-        self.testcase = None
         self.channel = None
 
         self._max_len = None
@@ -43,7 +42,11 @@ class DumbTracer(CrashTracer):
         self._bad_bytes = None
         self._save_ip_addr = None
 
-        self._fix_data = []
+        self._patch_strs = []
+
+    @property
+    def testcase(self):
+        return self.crash.crash_input
 
     def _investigate_crash(self, r, testcase, channel, pre_fire_hook, delay=0, actions=None):
         l.info("investigating crash @ %#x", r.crash_address)
@@ -103,13 +106,17 @@ class DumbTracer(CrashTracer):
             addr_str = addr_str[::-1]
             bad_data = bad_data[::-1]
 
-        # fix the data with a valid known pointer to rw region
-        self._fix_data.append(addr_str)
+        # replace the bad data with a valid known pointer to rw region and pin this
+        # patch to corresponding RexSendAction
+        self._patch_strs.append(addr_str)
         for act in self.crash.actions:
             if type(act) != RexSendAction:
                 continue
+            patches = [(i, addr_str) for i in range(len(act.data)) if act.data[i:i+len(addr_str)] == bad_data]
+            act.patches += patches
             act.data = act.data.replace(bad_data, addr_str)
-        self.crash._input_preparation(None, self.crash.actions, self.crash.input_type)
+        tup = self.crash._input_preparation(None, self.crash.actions, self.crash.input_type)
+        self.crash.crash_input, self.crash.actions, self.crash.sim_input = tup
 
         # Hack: we only need this project once, so let's destroy the initialized project bow and the project
         self.angr_project_bow.project = None
@@ -151,7 +158,6 @@ class DumbTracer(CrashTracer):
                                  trace_bb_addr=(self.crash_addr, times), crash_addr=(self.crash_addr, times),
                                  pre_fire_hook=pre_fire_hook, record_trace=True, actions=actions, taint=taint)
         self.trace_result = r
-        self.testcase = testcase
         self.channel = channel
 
         # if a coredump is available, save a copy of all registers in the coredump for future references
@@ -217,7 +223,9 @@ class DumbTracer(CrashTracer):
                 break
         if not idx:
             raise RuntimeError("WTF? the block at @ %#x does not load IP?" % self.crash_addr)
-        return crashing_state.solver.eval(read_addr_bvs[idx])
+        addr= crashing_state.solver.eval(read_addr_bvs[idx])
+        l.debug("identify saved ip addr @ %#x", addr)
+        return addr
 
     def bootstrap_state(self, state, **kwargs):
         """
@@ -278,9 +286,20 @@ class DumbTracer(CrashTracer):
             raise CrashTracerError("Fail to find the input socket")
         simfd.read_data(len(self.testcase))
 
+        # compute where to patch
+        concrete_str = state.solver.eval(state.memory.load(input_addr, max_len), cast_to=bytes)
+        patches = []
+        for patch_str in self._patch_strs:
+            addrs = [ input_addr+i for i in range(max_len) if concrete_str[i:i+len(patch_str)] == patch_str]
+            patches += list(zip(addrs, [patch_str]*len(addrs)))
+
         # replace concrete input with symbolic input for the socket
         sim_chunk = simfd.read_storage.load(marker_idx, max_len)
         state.memory.store(input_addr, sim_chunk)
+
+        # apply patches
+        for addr, patch_str in patches:
+            state.memory.store(addr, patch_str)
 
         # to simulate a tracing, the bad bytes constraints should be applied to state here
         self._bad_bytes = self.identify_bad_bytes(self.crash)
