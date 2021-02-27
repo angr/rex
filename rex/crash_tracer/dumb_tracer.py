@@ -10,6 +10,7 @@ import archr
 import claripy
 from tracer import TinyCore
 from archr.analyzers.angr_state import SimArchrMount
+from archr.analyzers.qemu_tracer import QEMUTracerError
 from angr.storage.file import SimFileDescriptorDuplex
 from cle.backends import ELFCore
 
@@ -474,10 +475,7 @@ class DumbTracer(CrashTracer):
                                      crash_addr=(self.crash_addr, self.crash_addr_times),
                                      trace_bb_addr=(self.crash_addr, self.crash_addr_times),
                                      pre_fire_hook=crash.pre_fire_hook, record_trace=True, actions=new_actions)
-        except archr.errors.ArchrError as ex:
-            l.debug("ArchrError: " + str(ex))
-            if "the target didn't crash inside qemu! Make sure you launch it correctly!" not in str(ex):
-                raise # please don't just consume all errors
+        except QEMUTracerError:
             # if the binary never reaches the crash address, the byte is a bad byte
             return True
         except nclib.errors.NetcatError:
