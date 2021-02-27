@@ -377,6 +377,9 @@ class CommCrash(SimCrash):
             send_act = RexSendAction(crash_input, channel_name=channel)
             actions = [open_act, send_act]
             sim_input = send_act.sim_data
+        if not crash_input:
+            raise ValueError("Crash input is empty! If you are using actions," +
+                             "plz make sure there is at least one RexSendAction in it!")
         return crash_input, actions, sim_input
 
     def concrete_trace(self):

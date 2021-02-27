@@ -249,10 +249,9 @@ class DumbTracer(CrashTracer):
     def _is_bad_byte(self, crash, bad_byte):
         l.info("perform bad byte test on byte: %#x...", bad_byte)
 
-        word_size = self.project.arch.bytes
-
         # prepare new input
         inp = bytes([bad_byte]*(self._max_len - (self._save_ip_addr - self._input_addr)))
+        taint_str = b'\xef\xbe\xad\xde\xbe\xba\xfe\xca'
 
         # prepare new actions
         new_actions = []
@@ -280,7 +279,6 @@ class DumbTracer(CrashTracer):
 
             # replace where ip should be with a taint, if there is no bad byte,
             # it should be found at a known address
-            taint_str = b'\xef\xbe\xad\xde\xbe\xba\xfe\xca'
             act.data = self._replace_bytes(act.data, end_offset-8, taint_str)
 
         # now interact with the target using new input. If there are any bad byte
