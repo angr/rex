@@ -858,6 +858,7 @@ class Crash(CommCrash):
 
         sp = self.state.solver.eval(self.state.regs.sp)
         stack_max_addr = self.project.loader.find_object_containing(sp).max_addr
+        MAX_RETURN_ADDR_SP_DISTANCE = 16
         for addr in self.symbolic_mem:
             # we have to do max now since with halfway_tracing the initial_state.regs.sp is no longer guaranteed to be
             # the highest. we need some wiggle room to make sure our stack is included, figure it if there's a better
@@ -878,6 +879,21 @@ class Crash(CommCrash):
 
             else:
                 control[addr] = self.symbolic_mem[addr]
+                # however, we want to make sure that we don't incorrectly believe that we control the stored return
+                # address on the stack - we do not want to overwrite it with shellcode!
+                if self.state._ip.symbolic and addr < sp <= addr + control[addr]:
+                    for distance in range(0, MAX_RETURN_ADDR_SP_DISTANCE, self.state.arch.bytes):
+                        expr = self.state.memory.load(sp - distance,
+                                                      size=self.state.arch.bytes,
+                                                      endness=self.state.arch.memory_endness)
+                        if not self.state.solver.satisfiable(extra_constraints=(expr != self.state._ip,)):
+                            # oops we found the stored return address in this region - break it into two
+                            chunk_size = control[addr]
+                            chunk0_size = sp - distance - addr
+                            control[addr] = chunk0_size
+                            chunk1_addr = sp - distance + self.state.arch.bytes
+                            control[chunk1_addr] = chunk_size - self.state.arch.bytes - control[addr]
+                            break
 
         STACK_ARGS_THRESHOLD = 5
         MIN_FREEDOM = 2
