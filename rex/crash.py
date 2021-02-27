@@ -860,8 +860,12 @@ class Crash(CommCrash):
         sp = self.state.solver.eval(self.state.regs.sp)
         sp_base = self.initial_state.solver.eval(self.initial_state.regs.sp)
         for addr in self.symbolic_mem:
+            # we have to do max now since with halfway_tracing the initial_state.regs.sp is no longer guaranteed to be
+            # the highest. we need some wiggle room to make sure our stack is included, figure it if there's a better
+            # way to do this later
+
             # discard our fake heap etc
-            if addr > sp_base | 0xfff:
+            if addr > (max(sp_base, sp)+0x10000) | 0xfff:
                 continue
 
             if below_sp:
