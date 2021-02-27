@@ -9,6 +9,7 @@ import claripy
 from tracer import TinyCore
 from archr.analyzers.angr_state import SimArchrMount
 from angr.storage.file import SimFileDescriptorDuplex
+from cle.backends import ELFCore
 
 from . import CrashTracer, CrashTracerError, add_options, remove_options
 from ..enums import CrashInputType
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
 l = logging.getLogger("rex.DumbTracer")
 
-DANGEROUS_BYTES = [0x00, 0x20, 0x25, 0x2b, 0x2d]
+DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x2b, 0x2d, 0x3b]
 class DumbTracer(CrashTracer):
     """
     generate a coredump 1 block before crashing, identify the crash input
@@ -83,12 +84,16 @@ class DumbTracer(CrashTracer):
         addr_str = None
         sim_addr = claripy.BVS("addr", project.arch.bytes*8)
         for obj in project.loader.all_elf_objects:
+            if type(obj) == ELFCore:
+                continue
             for seg in obj.segments:
                 if not seg.is_readable or not seg.is_writable:
                     continue
                 st = state.copy()
-                st.add_constraints(sim_addr >= seg.min_addr)
-                st.add_constraints(sim_addr < seg.max_addr)
+                # make it in the middle of a segment
+                st.add_constraints(sim_addr >= seg.min_addr+0x100)
+                st.add_constraints(sim_addr < seg.max_addr-0x100)
+                # no bad bytes
                 for c in DANGEROUS_BYTES:
                     for i in range(project.arch.bytes):
                         st.add_constraints(sim_addr.get_byte(i) != c)
