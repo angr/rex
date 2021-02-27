@@ -902,7 +902,8 @@ class Crash(CommCrash):
                     l.warning("Gap around stack pointer is detected. Refining controlled regions.")
                     # break the controlled region
                     filtered_control[addr] = gap_start - addr
-                    filtered_control[gap_end] = addr + size - gap_end
+                    if addr + size - gap_end > 0:
+                        filtered_control[gap_end] = addr + size - gap_end
                     continue
 
             filtered_control[addr] = size
