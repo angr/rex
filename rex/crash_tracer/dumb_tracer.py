@@ -316,6 +316,9 @@ class DumbTracer(CrashTracer):
 
         # search backward to determine the maximum length of controlled data
         max_backward_buffer_size = min(search_start - obj.min_addr, marker_idx)
+        if max_backward_buffer_size > 1024:
+            # no one needs more than 1KB of buffer size - Gill Bates
+            max_backward_buffer_size = 1024
         data = crashing_state.solver.eval(
             crashing_state.memory.load(search_start - max_backward_buffer_size, max_backward_buffer_size),
             cast_to=bytes,
