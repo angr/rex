@@ -566,6 +566,20 @@ class CommCrash(SimCrash):
             return 'udp6'
         raise NotImplementedError("Unsupported input type %s." % input_type)
 
+    @property
+    def is_cgc(self):
+        """
+        Are we working on a CGC binary?
+        """
+        return self.target.target_os == 'cgc'
+
+    @property
+    def is_linux(self):
+        """
+        Are we working on a Linux binary?
+        """
+        return self.target.target_os == 'linux'
+
 class Crash(CommCrash):
     """
     Triage and exploit a crash using angr.
