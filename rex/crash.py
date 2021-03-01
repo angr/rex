@@ -593,13 +593,14 @@ class Crash(CommCrash):
         self.added_actions = [ ]  # list of actions added during exploitation
         self.violating_action = None  # action (in case of a bad write or read) which caused the crash
 
+        # Initialize
+        self._initialize()
+
         # by default, we assume non-cgc OS has ASLR on
+        # this has to happen after _initialize so the project is initialized
         self.aslr = aslr
         if aslr is None:
             self.aslr = not self.is_cgc
-
-        # Initialize
-        self._initialize()
 
         # Work
         self._work()
