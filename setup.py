@@ -21,7 +21,7 @@ setup(
         'tracer',
         'povsim',
         'compilerex',
-        'pwntools @ git+ssh://git@github.com/Lukas-Dresel/pwntools@dev#egg=pwntools',
+        'pwntools@git+ssh://git@github.com/Lukas-Dresel/pwntools@dev#egg=pwntools',
     ],
     package_data={
         'rex': ['rex/scripter/templates/*']
