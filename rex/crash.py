@@ -858,7 +858,8 @@ class Crash(CommCrash):
             return control
 
         sp = self.state.solver.eval(self.state.regs.sp)
-        stack_max_addr = self.project.loader.find_object_containing(sp).max_addr
+        stack_core_obj = self.project.loader.find_object_containing(sp)
+        stack_max_addr = stack_core_obj.max_addr if stack_core_obj is not None else (sp + 0xfff) & ~0xfff
         MAX_RETURN_ADDR_SP_DISTANCE = 16
         for addr in self.symbolic_mem:
             # we have to do max now since with halfway_tracing the initial_state.regs.sp is no longer guaranteed to be
