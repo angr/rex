@@ -29,52 +29,60 @@ def test_dupsh(arch, fd_to_dup):
     if arch.name == 'ARMEL':
         # VEX sucks at decoding SVC instructions with operands that are non-zero, so we replace them
         shellcode = shellcode.replace(b'\x01\xdf', b'\x00\xdf').replace(b'\x41\xdf', b'\x00\xdf')
-    with pwnlib.context.context.local(arch=arch_to_pwntools[arch.name], endian=endness_to_pwntools[arch.memory_endness]):
+    with pwnlib.context.context.local(arch=arch_to_pwntools[arch.name],
+                                      endian=endness_to_pwntools[arch.memory_endness]):
         elf_path = pwnlib.asm.make_elf(shellcode, extract=False)
     proj = angr.Project(elf_path)
-    assert type(proj.simos) is SimLinux
+    assert isinstance(proj.simos, SimLinux)
     syscall_lib : SimLibrary = proj.simos.syscall_library
 
-    dups_to_check = {0,1,2}
-    class logging_dup2(angr.SimProcedure):
-        def run(self, fd1, fd2):
+    dups_to_check = {0, 1, 2}
+
+    class logging_dup2(angr.SimProcedure):  # pylint:disable=invalid-name
+        def run(self, fd1, fd2):  # pylint:disable=arguments-differ
             fd1 = self.state.solver.eval_one(fd1)
             fd2 = self.state.solver.eval_one(fd2)
             print(f"dup2({fd1}, {fd2})")
             assert fd1 == fd_to_dup, 'did not dup2 the correct source file descriptor'
-            assert fd2 in dups_to_check, 'dup2\'ed to a file descriptor that was either not requested or already dup\'ed to once.'
+            assert fd2 in dups_to_check, \
+                'dup2\'ed to a file descriptor that was either not requested or already dup\'ed'
             dups_to_check.remove(fd2)
 
-    class logging_execve(angr.SimProcedure):
-        def run(self, binary, argv, envp):
+    class logging_execve(angr.SimProcedure):  # pylint:disable=invalid-name
+        def run(self, binary, argv, envp):  # pylint:disable=arguments-differ
             assert not dups_to_check, "Shellcode failed to dup some fds: " + repr(dups_to_check)
-            bin = self.state.mem[binary].string.concrete
-            assert re.fullmatch(b'/+bin/+sh', bin), f"The shellcode executed {bin} instead of /bin/sh"
+            binary = self.state.mem[binary].string.concrete
+            assert re.fullmatch(b'/+bin/+sh', binary), \
+                f"The shellcode executed {bin} instead of /bin/sh"
             progname = self.state.mem[argv].deref.string.concrete
-            assert progname == b'sh' or re.fullmatch(b'/+bin/+sh', progname), f"The shellcode did not set argv[0] correctly, instead it set it to {progname}"
-            assert self.state.mem[argv].uintptr_t.array(2)[1].concrete == 0, "The shellcode didn't NULL terminate argv"
-            assert self.state.solver.eval_one(envp) == 0 or self.state.mem[envp].uintptr_t.concrete == 0, "envp is incorrect"
+            assert progname == b'sh' or re.fullmatch(b'/+bin/+sh', progname), \
+                f"The shellcode did not set argv[0] correctly, instead it set it to {progname}"
+            assert self.state.mem[argv].uintptr_t.array(2)[1].concrete == 0, \
+                "The shellcode didn't NULL terminate argv"
+            assert self.state.solver.eval_one(envp) == 0 or \
+                   self.state.mem[envp].uintptr_t.concrete == 0, \
+                "envp is incorrect"
             self.exit(0)
 
     syscall_lib.add('dup2', logging_dup2)
     syscall_lib.add('execve', logging_execve)
 
-    s = proj.factory.entry_state(add_options={
+    state = proj.factory.entry_state(add_options={
         angr.options.TRACK_MEMORY_ACTIONS,
         angr.options.TRACK_REGISTER_ACTIONS,
         angr.options.TRACK_CONSTRAINT_ACTIONS
     })
-    sm = proj.factory.simulation_manager(s)
-    sm.run()
-    assert sm.deadended and not sm.errored, f"An error occurred: {sm.errored[0]}"
+    simgr = proj.factory.simulation_manager(state)
+    simgr.run()
+    assert simgr.deadended and not simgr.errored, f"An error occurred: {simgr.errored[0]}"
 
 if __name__ == '__main__':
     rand_fd = random.randint(0, 60)
-    for arch in [
+    for arch_to_test in [
         archinfo.ArchX86(),
         archinfo.ArchAMD64(),
         archinfo.ArchMIPS32(endness=Endness.LE),
         archinfo.ArchMIPS32(endness=Endness.BE),
         archinfo.ArchARMEL()
     ]:
-        test_dupsh(arch, rand_fd)
+        test_dupsh(arch_to_test, rand_fd)
