@@ -395,6 +395,8 @@ class CommCrash(SimCrash):
                 taint = act.data
                 break
         taint = taint[:0x100]
+        # FIXME: we disable communication fd analysis for now because of issues with shellphish-qemu releases
+        taint = None
 
         # transform input to channel and test_case
         channel, testcase = self._prepare_channel()
