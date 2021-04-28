@@ -31,7 +31,7 @@ def _do_pov_test(pov, enable_randomness=True):
 def _check_arsenal_has_send(arsenal):
     # Test that the script generated for the arsenal has sends (i.e. is not null)
     for exploit in arsenal.values():
-        assert "send_all" in exploit.script()
+        assert ".send(" in exploit.script()
 
 
 #
