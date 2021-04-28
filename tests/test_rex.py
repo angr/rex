@@ -252,7 +252,7 @@ def test_linux_network_stacksmash_64():
         crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
                           input_type=rex.enums.CrashInputType.TCP, port=port)
 
-        exploit = crash.exploit()
+        exploit = crash.exploit(cmd=b"echo hello")
         crash.project.loader.close()
 
         assert 'call_shellcode' in exploit.arsenal
@@ -281,8 +281,7 @@ def test_linux_network_stacksmash_64():
 
             exploit_result = subprocess.check_output(["python", exploit_location,
                                                       "127.0.0.1", str(new_port),
-                                                      "-c", "echo hello"
-                                                      ])
+                                                      ], timeout=3)
             assert b"hello" in exploit_result
         finally:
             os.unlink(exploit_location)
