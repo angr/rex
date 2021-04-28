@@ -70,7 +70,7 @@ class BaseCrash:
         rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
         # FIXME: stop hardcoding dude...
         rop.set_badbytes(self._bad_bytes)
-        if self._rop_cache:
+        if self._rop_cache and self._rop_cache[0]:
             l.info("Loading rop gadgets from cache")
             rop._load_cache_tuple(self._rop_cache[0])
         else:
@@ -110,7 +110,7 @@ class BaseCrash:
         project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
         libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
         libc_rop.set_badbytes(self._bad_bytes)
-        if self._rop_cache:
+        if self._rop_cache and self._rop_cache[1]:
             l.info("Loading libc rop gadgets from cache")
             libc_rop._load_cache_tuple(self._rop_cache[1])
         else:
@@ -136,8 +136,8 @@ class BaseCrash:
         # do not overwrite existing cache
         if os.path.exists(self._rop_cache_path):
             return
-        rop_cache_tuple = self.rop._get_cache_tuple()
-        libc_rop_cache_tuple = self.libc_rop._get_cache_tuple()
+        rop_cache_tuple = self.rop._get_cache_tuple() if self.rop else None
+        libc_rop_cache_tuple = self.libc_rop._get_cache_tuple() if self.libc_rop else None
         rop_cache = (rop_cache_tuple, libc_rop_cache_tuple)
         with open(self._rop_cache_path, "wb") as f:
             pickle.dump(rop_cache, f)
