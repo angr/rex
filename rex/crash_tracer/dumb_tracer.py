@@ -54,7 +54,7 @@ class DumbTracer(CrashTracer):
     def testcase(self):
         return self.crash.crash_input
 
-    def _investigate_crash(self, r, testcase, channel, pre_fire_hook, delay=0, actions=None):
+    def _investigate_crash(self, r, testcase, channel, pre_fire_hook, delay=0):
         l.info("investigating crash @ %#x", r.crash_address)
 
         # create a project
@@ -82,7 +82,7 @@ class DumbTracer(CrashTracer):
         else:
             raise CrashTracerError("There is no memory access in the last instruction" +
                                    "why does it crash?")
-        bad_ptr = act.addr.ast
+        bad_ptr = act.addr.ast # pylint:disable=undefined-loop-variable
         bad_data = state.solver.eval(bad_ptr, cast_to=bytes)
 
         # find an address in rw region with no dangerous bytes
@@ -180,7 +180,7 @@ class DumbTracer(CrashTracer):
         # the target crashes at memory accessing
         if r.crash_address in r.trace:
             if investigate:
-                return self._investigate_crash(r, testcase, channel, pre_fire_hook, delay=delay, actions=actions)
+                return self._investigate_crash(r, testcase, channel, pre_fire_hook, delay=delay)
             raise CrashTracerError("Not an IP control vulnerability!")
 
         self._fixate_pointers(r)
@@ -249,8 +249,8 @@ class DumbTracer(CrashTracer):
         # just in case the value loaded to ip is not unique in those reads
         init_state = state.copy()
         sim_words = [claripy.BVS('taint_word', self.project.arch.bits) for _ in read_addr_bvs]
-        for idx in range(len(read_addr_bvs)):
-            init_state.memory.store(read_addr_bvs[idx], sim_words[idx])
+        for idx, addr_bv in enumerate(read_addr_bvs):
+            init_state.memory.store(addr_bv, sim_words[idx])
 
         # step from the tainted state once
         simgr = self.project.factory.simgr(init_state, save_unconstrained=True)
@@ -315,10 +315,9 @@ class DumbTracer(CrashTracer):
             max_len_forward = len(data)
 
         # search backward to determine the maximum length of controlled data
-        max_backward_buffer_size = min(search_start - obj.min_addr, marker_idx)
-        if max_backward_buffer_size > 1024:
-            # no one needs more than 1KB of buffer size - Gill Bates
-            max_backward_buffer_size = 1024
+        # no one needs more than 1KB of buffer size - Gill Bates
+        max_backward_buffer_size = min(search_start - obj.min_addr, marker_idx, 1024)
+
         data = crashing_state.solver.eval(
             crashing_state.memory.load(search_start - max_backward_buffer_size, max_backward_buffer_size),
             cast_to=bytes,
@@ -383,7 +382,7 @@ class DumbTracer(CrashTracer):
 
         return state
 
-    def _get_buffer_size(self, crash):
+    def _get_buffer_size(self):
         """
         identify the size of bytes we control before overwriting return address
         """
@@ -504,7 +503,7 @@ class DumbTracer(CrashTracer):
         if self._bad_bytes is not None:
             return self._bad_bytes
 
-        self._buffer_size = self._get_buffer_size(crash)
+        self._buffer_size = self._get_buffer_size()
 
         bad_bytes = []
         for c in DANGEROUS_BYTES:

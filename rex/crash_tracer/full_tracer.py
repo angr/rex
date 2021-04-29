@@ -1,17 +1,10 @@
 import os
 import logging
 
-from abc import abstractmethod
-from typing import Union, Tuple
-
 import archr
 from tracer import TinyCore
-from angr import sim_options as so
-from archr.analyzers.angr_state import SimArchrMount
-from angr.storage.file import SimFileDescriptorDuplex
 
-from . import CrashTracer, CrashTracerError, add_options, remove_options
-from ..enums import CrashInputType
+from . import CrashTracer, add_options, remove_options
 
 l = logging.getLogger("rex.HalfwayTracer")
 

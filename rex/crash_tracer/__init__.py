@@ -78,7 +78,8 @@ class CrashTracer:
     def _channel_to_input_type(channel):
         return channel.split(":")[0]
 
-    def identify_bad_bytes(self, crash):
+    @staticmethod
+    def identify_bad_bytes(crash):
         """
         identify the bad bytes by inspecting constraints in an unconstrained state
         the extracted bad bytes are used to help angrop filter gadgets
