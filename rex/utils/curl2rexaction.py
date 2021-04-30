@@ -8,10 +8,6 @@ import nclib
 from rex.exploit.actions import RexWaitAction, RexOpenChannelAction, RexSendAction, RexCloseChannelAction
 
 
-class TimeoutError(Exception):
-    pass
-
-
 def timeout(seconds_before_timeout):
     def decorate(f):
         def handler(signum, frame):
@@ -42,7 +38,7 @@ def recvall(r):
     while True:
         try:
             data += recv_once(r)
-        except Exception as ex:
+        except Exception: #pylint:disable=broad-except
             return data
 
 def force_kill(r):
