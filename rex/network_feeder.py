@@ -60,7 +60,7 @@ class NetworkFeeder:
             sock.recv(1024)
 
             sock.close()
-        except Exception:
+        except Exception: #pylint:disable=broad-except
             _l.error("Failed to feed network data to target %s:%d.", self._host, self._port, exc_info=True)
         finally:
             # Pop the thread object
