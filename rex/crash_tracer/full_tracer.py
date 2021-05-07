@@ -6,7 +6,7 @@ from tracer import TinyCore
 
 from . import CrashTracer, add_options, remove_options
 
-l = logging.getLogger("rex.HalfwayTracer")
+l = logging.getLogger(__name__)
 
 class SimTracer(CrashTracer):
     def __init__(self, crash, **kwargs):

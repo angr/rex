@@ -7,7 +7,7 @@ from archr.analyzers.angr_state import SimArchrMount
 
 from . import CrashTracer, add_options, remove_options
 
-l = logging.getLogger("rex.HalfwayTracer")
+l = logging.getLogger(__name__)
 
 class HalfwayTracer(CrashTracer):
     """
