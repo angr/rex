@@ -1,5 +1,5 @@
-import random
 import re
+import random
 
 import archinfo
 import angr
@@ -23,7 +23,15 @@ endness_to_pwntools = {
     Endness.BE: 'big'
 }
 
-def test_dupsh(arch, fd_to_dup):
+arches_to_test = [
+        archinfo.ArchX86(),
+        archinfo.ArchAMD64(),
+        archinfo.ArchMIPS32(endness=Endness.LE),
+        archinfo.ArchMIPS32(endness=Endness.BE),
+        archinfo.ArchARMEL()
+    ]
+
+def run_dupsh(arch, fd_to_dup):
     print(f"Testing shellcode to dup fd {fd_to_dup} for architecture {arch}!")
     shellcode = Shellcodes['unix'][arch.name]['dupsh'](fd=(fd_to_dup,)).raw(arch=arch)
     if arch.name == 'ARMEL':
@@ -76,13 +84,12 @@ def test_dupsh(arch, fd_to_dup):
     simgr.run()
     assert simgr.deadended and not simgr.errored, f"An error occurred: {simgr.errored[0]}"
 
+def test_dupsh():
+    for test_arch in arches_to_test: #pylint:disable=redefined-outer-name
+        fd = random.randint(0, 60) #pylint:disable=redefined-outer-name
+        yield run_dupsh, test_arch, fd
+
 if __name__ == '__main__':
-    rand_fd = random.randint(0, 60)
-    for arch_to_test in [
-        archinfo.ArchX86(),
-        archinfo.ArchAMD64(),
-        archinfo.ArchMIPS32(endness=Endness.LE),
-        archinfo.ArchMIPS32(endness=Endness.BE),
-        archinfo.ArchARMEL()
-    ]:
-        test_dupsh(arch_to_test, rand_fd)
+    for test_arch in arches_to_test:
+        fd = random.randint(0, 60)
+        run_dupsh(test_arch, fd)
