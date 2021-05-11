@@ -18,7 +18,7 @@ def test_write_what_where_shadowstack():
     path = os.path.join(bin_location, "tests/cgc/write_what_where_shadow_stack")
 
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
-        crash = rex.Crash(target, inp, rop_cache_path=os.path.join(cache_location, "write_what_where_shadow_stack"))
+        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, "write_what_where_shadow_stack"))
         arsenal = crash.exploit()
         crash.project.loader.close()
 

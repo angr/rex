@@ -17,8 +17,13 @@ setup(
         'angr',
         'archr',
         'angrop',
+        'jinja2',
         'tracer',
         'povsim',
         'compilerex',
+        'pwntools@git+https://github.com/Lukas-Dresel/pwntools@dev',
     ],
+    package_data={
+        'rex': ['rex/scripter/templates/*']
+    },
 )

@@ -1,0 +1,3 @@
+#!/bin/sh
+/usr/bin/curl "$@"
+/bin/sleep 0.5

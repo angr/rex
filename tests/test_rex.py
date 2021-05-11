@@ -14,7 +14,7 @@ import colorguard
 from rex.vulnerability import Vulnerability
 from angr.state_plugins.trace_additions import FormatInfoStrToInt, FormatInfoDontConstrain
 from rex.exploit.cgc.type1.cgc_type1_shellcode_exploit import CGCType1ShellcodeExploit
-from nose.plugins.attrib import attr
+#from nose.plugins.attrib import attr
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
@@ -31,8 +31,7 @@ def _do_pov_test(pov, enable_randomness=True):
 def _check_arsenal_has_send(arsenal):
     # Test that the script generated for the arsenal has sends (i.e. is not null)
     for exploit in arsenal.values():
-        exploit.script()
-        assert "r.send" in exploit._script_string
+        assert ".send(" in exploit.script()
 
 
 #
@@ -42,7 +41,6 @@ def _check_arsenal_has_send(arsenal):
 # this should be removed when we reduce the amount of solver thrashing that happens in claripy
 # or when we move to a test runner with more RAM.
 #
-@attr(speed='slow')
 def test_legit_00001():
     # Test exploitation of legit_00001 given a good crash.
 
@@ -64,8 +62,6 @@ def test_legit_00001():
         for leaker in arsenal.leakers:
             nose.tools.assert_true(_do_pov_test(leaker))
 
-        crash.project.loader.close()
-
 def test_legit_00003():
     # Test exploration and exploitation of legit_00003.
 
@@ -83,8 +79,6 @@ def test_legit_00003():
 
         nose.tools.assert_true(len(arsenal.register_setters) >= 2)
         nose.tools.assert_true(len(arsenal.leakers) >= 1)
-
-        crash.project.loader.close()
 
         for reg_setter in arsenal.register_setters:
             nose.tools.assert_true(_do_pov_test(reg_setter))
@@ -132,8 +126,6 @@ def test_shellcode_placement():
         nose.tools.assert_equal(struct.unpack("<I", exploit._raw_payload[-4:])[0] & 0xfffff000, heap_top)
         exec_regions = list(filter(lambda a: crash.state.solver.eval(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem))
 
-        crash.project.loader.close()
-
         # should just be two executable regions
         nose.tools.assert_equal(len(exec_regions), 2)
 
@@ -149,8 +141,6 @@ def test_boolector_solving():
         crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'add_payload'))
 
         arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory'})
-
-        crash.project.loader.close()
 
         nose.tools.assert_true(len(arsenal.register_setters) >= 3)
         nose.tools.assert_true(len(arsenal.leakers) >= 1)
@@ -206,10 +196,9 @@ def test_linux_stacksmash_64():
     ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
     path = os.path.join(lib_path, "vuln_stacksmash")
     with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='x86_64').build().start() as target:
-        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
+        crash = rex.Crash(target, crash=inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
 
         exploit = crash.exploit()
-        crash.project.loader.close()
 
         # make sure we're able to exploit it to call shellcode
         assert 'call_shellcode' in exploit.arsenal
@@ -229,7 +218,6 @@ def test_linux_stacksmash_32():
         crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'))
 
         exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
-        crash.project.loader.close()
 
         # make sure we're able to exploit it in all possible ways
         assert len(exploit.arsenal) == 3
@@ -244,18 +232,17 @@ def test_linux_network_stacksmash_64():
     # Test exploiting a simple network server with a stack-based buffer overflow.
     inp = b'\x00' * 500
     lib_path = os.path.join(bin_location, "tests/x86_64")
-    ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
+    # ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
     path = os.path.join(lib_path, "network_overflow")
     port = random.randint(8000, 9000)
     with archr.targets.LocalTarget([path, str(port)], path,
                                    target_arch='x86_64',
                                    ipv4_address="127.0.0.1",
                                    tcp_ports=(port,)).build().start() as target:
-        crash = rex.Crash(target, inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
+        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
                           input_type=rex.enums.CrashInputType.TCP, port=port)
 
-        exploit = crash.exploit()
-        crash.project.loader.close()
+        exploit = crash.exploit(cmd=b"echo hello")
 
         assert 'call_shellcode' in exploit.arsenal
 
@@ -270,21 +257,20 @@ def test_linux_network_stacksmash_64():
                                    ipv4_address="127.0.0.1",
                                    tcp_ports=(new_port,)).build().start() as new_target:
         try:
-            p = new_target.run_command("")
+            new_target.run_command("")
 
             # wait for the target to load
             time.sleep(.5)
-            
+
             temp_script = tempfile.NamedTemporaryFile(suffix=".py", delete=False)
             exploit_location = temp_script.name
             temp_script.close()
-            
-            exploit.arsenal['call_shellcode'].script(exploit_location)
+
+            exploit.arsenal['call_shellcode'].script(filename=exploit_location)
 
             exploit_result = subprocess.check_output(["python", exploit_location,
                                                       "127.0.0.1", str(new_port),
-                                                      "-c", "echo hello"
-                                                      ])
+                                                      ], timeout=3)
             assert b"hello" in exploit_result
         finally:
             os.unlink(exploit_location)
@@ -300,7 +286,6 @@ def test_cgc_type1_rop_stacksmash():
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
         crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'sc1_0b32aa01_01'))
         arsenal = crash.exploit()
-        crash.project.loader.close()
 
         # make sure we can control ecx, edx, ebx, ebp, esi, and edi with rop
         nose.tools.assert_true(len(arsenal.register_setters) >= 3)
@@ -331,8 +316,6 @@ def test_exploit_yielding():
             register_setters += 1 if exploit.cgc_type == 1 else 0
             nose.tools.assert_true(_do_pov_test(exploit))
 
-        crash.project.loader.close()
-
         # make sure we can generate a few different exploits
         nose.tools.assert_true(register_setters >= 3)
         nose.tools.assert_true(leakers >= 2)
@@ -355,8 +338,6 @@ def _do_arbitrary_transmit_test_for(binary):
             nose.tools.assert_true(cg.causes_leak())
             pov = cg.attempt_exploit()
             nose.tools.assert_true(pov.test_binary())
-
-        crash.project.loader.close()
 
 def test_arbitrary_transmit():
     # Test our ability to exploit an arbitrary transmit
@@ -421,7 +402,6 @@ def test_reconstraining():
         x = cg.attempt_exploit()
         nose.tools.assert_not_equal(x, None)
         nose.tools.assert_true(_do_pov_test(x))
-        crash.project.loader.close()
 
 def test_cromu71():
     inp = b'3&\x1b\x17/\x12\x1b\x1e]]]]]]]]]]]]]]]]]]]]\n\x1e\x7f\xffC^\n'
@@ -437,7 +417,6 @@ def test_cromu71():
 
         # let's generate some exploits for it
         arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
-        crash.project.loader.close()
 
         # make sure it works
         nose.tools.assert_true(_do_pov_test(arsenal.best_type1))
@@ -446,8 +425,9 @@ def test_halfway_tracing():
     inp = b'A'*100
     bin_path = os.path.join(bin_location, "tests", "x86_64", "stack_smash")
     with archr.targets.LocalTarget([bin_path], target_arch='x86_64').build().start() as target:
-        bow = archr.arsenal.QEMUTracerBow(target)
-        crash = rex.Crash(target, inp, fast_mode=True, use_rop=True, tracer_bow=bow, trace_addr=0x4005bd)
+        tracer_opts = {"trace_addr": 0x4005bd}
+        crash = rex.Crash(target, inp, fast_mode=True, use_rop=True, trace_mode="halfway", tracer_opts=tracer_opts,
+                          rop_cache_path=os.path.join(cache_location, 'halfway_stack_smash'))
         exp = crash.exploit()
 
         nose.tools.assert_true('rop_to_system' in exp.arsenal)
