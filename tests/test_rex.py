@@ -242,7 +242,7 @@ def test_linux_network_stacksmash_64():
         crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
                           input_type=rex.enums.CrashInputType.TCP, port=port)
 
-        exploit = crash.exploit(cmd=b"echo hello")
+        exploit = crash.exploit(cmd=b"echo hello", blacklist_techniques={'ret2libc'})
 
         assert 'call_shellcode' in exploit.arsenal
 
