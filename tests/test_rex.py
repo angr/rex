@@ -198,7 +198,7 @@ def test_linux_stacksmash_64():
     with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='x86_64').build().start() as target:
         crash = rex.Crash(target, crash=inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
 
-        exploit = crash.exploit()
+        exploit = crash.exploit(blacklist_techniques={'ret2libc'})
 
         # make sure we're able to exploit it to call shellcode
         assert 'call_shellcode' in exploit.arsenal
@@ -217,7 +217,7 @@ def test_linux_stacksmash_32():
     with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='i386').build().start() as target:
         crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'))
 
-        exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register'})
+        exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register', 'ret2libc'})
 
         # make sure we're able to exploit it in all possible ways
         assert len(exploit.arsenal) == 3
@@ -242,7 +242,7 @@ def test_linux_network_stacksmash_64():
         crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
                           input_type=rex.enums.CrashInputType.TCP, port=port)
 
-        exploit = crash.exploit(cmd=b"echo hello")
+        exploit = crash.exploit(cmd=b"echo hello", blacklist_techniques={'ret2libc'})
 
         assert 'call_shellcode' in exploit.arsenal
 
