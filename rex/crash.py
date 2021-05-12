@@ -68,7 +68,6 @@ class BaseCrash:
 
         # finally, create an angrop object
         rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
-        # FIXME: stop hardcoding dude...
         rop.set_badbytes(self._bad_bytes)
         if self._rop_cache and self._rop_cache[0]:
             l.info("Loading rop gadgets from cache")
