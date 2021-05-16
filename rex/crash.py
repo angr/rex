@@ -1192,14 +1192,10 @@ class Crash(CommCrash):
 
         # grab the all actions in the last basic block
         symbolic_actions = [ ]
-        if self._t is not None and self._t.last_state is not None:
-            recent_actions = reversed(self._t.last_state.history.recent_actions)
-        else:
-            recent_actions = reversed(self.state.history.actions)
+        recent_actions = reversed(self.state.history.actions)
         for a in recent_actions:
-            if a.type == 'mem':
-                if self.state.solver.symbolic(a.addr.ast):
-                    symbolic_actions.append(a)
+            if a.type == 'mem' and self.state.solver.symbolic(a.addr.ast):
+                symbolic_actions.append(a)
 
         # TODO: pick the crashing action based off the crashing instruction address,
         # crash fixup attempts will break on this
