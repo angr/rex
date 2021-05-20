@@ -34,9 +34,6 @@ arches_to_test = [
 def run_dupsh(arch, fd_to_dup):
     print(f"Testing shellcode to dup fd {fd_to_dup} for architecture {arch}!")
     shellcode = Shellcodes['unix'][arch.name]['dupsh'](fd=(fd_to_dup,)).raw(arch=arch)
-    if arch.name == 'ARMEL':
-        # VEX sucks at decoding SVC instructions with operands that are non-zero, so we replace them
-        shellcode = shellcode.replace(b'\x01\xdf', b'\x00\xdf').replace(b'\x41\xdf', b'\x00\xdf')
     with pwnlib.context.context.local(arch=arch_to_pwntools[arch.name],
                                       endian=endness_to_pwntools[arch.memory_endness]):
         elf_path = pwnlib.asm.make_elf(shellcode, extract=False)
