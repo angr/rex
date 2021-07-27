@@ -445,7 +445,7 @@ class CommCrash(SimCrash):
 
         # tracing completed
         # if there was no crash we'll have to use the previous path's state
-        if 'crashed' in simgr.stashes:
+        if simgr.stashes.get('crashed', []):
             # the state at crash time
             self.state = simgr.crashed[0]
             # a path leading up to the crashing basic block
