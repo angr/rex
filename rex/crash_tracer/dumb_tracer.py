@@ -343,12 +343,14 @@ class DumbTracer(CrashTracer):
 
         # only support network input at the moment
         input_type = self._channel_to_input_type(self.channel)
-        assert input_type != CrashInputType.STDIN, "input from stdin is not supported by dumb tracer right now"
+        # assert input_type != CrashInputType.STDIN, "input from stdin is not supported by dumb tracer right now"
 
         # open a fake socket, look for it and fake reading from it
-        state.posix.open_socket(3)
+        on_stdin = input_type == CrashInputType.STDIN
+        if not on_stdin:
+            state.posix.open_socket(3)
         for fd in state.posix.fd:
-            if fd in [0, 1, 2]:
+            if fd in [0, 1, 2] and not on_stdin:
                 continue
             simfd = state.posix.fd[fd]
             if not isinstance(simfd, SimFileDescriptorDuplex):

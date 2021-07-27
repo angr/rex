@@ -742,7 +742,7 @@ class Crash(CommCrash):
 
         # crash should be classified at this point
         if not self.explorable():
-                raise CannotExplore("non-explorable crash")
+            raise CannotExplore("non-explorable crash")
 
         self._reconstrain_flag_data(self.state)
 

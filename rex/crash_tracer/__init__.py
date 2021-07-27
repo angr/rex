@@ -104,6 +104,7 @@ class CrashTracer:
             bad_bytes.append(c)
         return bad_bytes
 
+from ..enums import CrashInputType
 
 from .full_tracer import SimTracer
 from .halfway_tracer import HalfwayTracer
