@@ -76,7 +76,8 @@ class CrashTracer:
 
     @staticmethod
     def _channel_to_input_type(channel):
-        return channel.split(":")[0]
+        s = channel.split(":")[0]
+        return CrashInputType.STDIN if s == 'stdio' else s
 
     @staticmethod
     def identify_bad_bytes(crash):
