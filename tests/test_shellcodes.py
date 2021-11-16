@@ -40,7 +40,7 @@ def run_dupsh(arch, fd_to_dup):
     with pwnlib.context.context.local(arch=arch_to_pwntools[arch.name],
                                       endian=endness_to_pwntools[arch.memory_endness]):
         elf_path = pwnlib.asm.make_elf(shellcode, extract=False)
-    proj = angr.Project(elf_path)
+    proj = angr.Project(elf_path, auto_load_libs=False)
     assert isinstance(proj.simos, SimLinux)
     syscall_lib : SimLibrary = proj.simos.syscall_library
 

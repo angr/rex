@@ -27,7 +27,7 @@ def break_chall_resp_atoi():
                   b'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
 
     bin_path = bin_location + "/tests/i386/chall_resp_atoi"
-    cfg_fast = angr.Project(bin_path).analyses.CFGFast()
+    cfg_fast = angr.Project(bin_path, auto_load_libs=False).analyses.CFGFast()
     atoi_addr = cfg_fast.functions["atoi"].addr
     itoa_addr = cfg_fast.functions["itoa"].addr
     f1 = FormatInfoIntToStr(addr=itoa_addr, func_name="itoa", int_arg_num=1, str_dst_num=0, base=10, base_arg=None)
