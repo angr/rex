@@ -1,9 +1,9 @@
 import re
 import random
-
+import unittest
 import archinfo
 import angr
-import unittest
+
 import pwnlib
 
 from angr.procedures.definitions import SimLibrary
@@ -103,3 +103,4 @@ class TestRunDupsh(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+    
