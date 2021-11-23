@@ -1,6 +1,7 @@
 import re
 import random
 import unittest
+
 import archinfo
 import angr
 
@@ -22,15 +23,6 @@ endness_to_pwntools = {
     Endness.LE: 'little',
     Endness.BE: 'big'
 }
-
-arches_to_test = [
-        archinfo.ArchX86(),
-        archinfo.ArchAMD64(),
-        archinfo.ArchMIPS32(endness=Endness.LE),
-        archinfo.ArchMIPS32(endness=Endness.BE),
-        archinfo.ArchARMEL()
-    ]
-
 
 class TestRunDupsh(unittest.TestCase):
     def _run_dupsh(self, arch, fd_to_dup):
@@ -87,10 +79,10 @@ class TestRunDupsh(unittest.TestCase):
         assert simgr.deadended and not simgr.errored, f"An error occurred: {simgr.errored[0]}"
 
     def test_ArchX86(self):
-        self._run_dupsh(archinfo.ArchX86(), random.randint(0,60))
+        self._run_dupsh(archinfo.ArchX86(), random.randint(0, 60))
 
     def test_ArchAMD64(self):
-        self._run_dupsh(archinfo.ArchAMD64(), random.randint(0,60))
+        self._run_dupsh(archinfo.ArchAMD64(), random.randint(0, 60))
 
     def test_ArchMIPS32_LE(self):
         self._run_dupsh(archinfo.ArchMIPS32(endness=Endness.LE), random.randint(0, 60))
@@ -103,4 +95,3 @@ class TestRunDupsh(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-    
