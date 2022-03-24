@@ -1,7 +1,4 @@
-
 import os
-
-import nose
 
 import rex
 import archr
@@ -23,7 +20,7 @@ def test_write_what_where_shadowstack():
         crash.project.loader.close()
 
         exploit = arsenal.best_type2
-        nose.tools.assert_true(exploit.test_binary())
+        assert exploit.test_binary()
 
 
 def run_all():
