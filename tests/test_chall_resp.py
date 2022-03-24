@@ -1,7 +1,6 @@
 import rex
 import angr
 import archr
-import nose
 import flaky
 from angr.state_plugins.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt
 
@@ -36,9 +35,9 @@ def break_chall_resp_atoi():
     crash = rex.Crash(bin_path, crash=crash_input, format_infos=[f1, f2], rop_cache_path=os.path.join(cache_location, "chall_resp_atoi"))
     exploit_f = crash.exploit()
     for e in exploit_f.register_setters:
-        nose.tools.assert_true(_do_pov_test(e))
+        assert _do_pov_test(e)
     for e in exploit_f.leakers:
-        nose.tools.assert_true(_do_pov_test(e))
+        assert _do_pov_test(e)
 
 
 def test_chall_response():
@@ -54,9 +53,9 @@ def test_chall_response():
         crash.project.loader.close()
 
         for e in exploit_f.register_setters:
-            nose.tools.assert_true(_do_pov_test(e))
+            assert _do_pov_test(e)
         for e in exploit_f.leakers:
-            nose.tools.assert_true(_do_pov_test(e))
+            assert _do_pov_test(e)
 
 @flaky.flaky(3, 1)
 def test_chall_resp_rand():
@@ -72,9 +71,9 @@ def test_chall_resp_rand():
         crash.project.loader.close()
 
         for e in exploit_f.register_setters:
-            nose.tools.assert_true(_do_pov_test(e))
+            assert _do_pov_test(e)
         for e in exploit_f.leakers:
-            nose.tools.assert_true(_do_pov_test(e))
+            assert _do_pov_test(e)
 
 
 def run_all():
