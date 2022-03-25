@@ -1,8 +1,7 @@
 import os
 
-import rex
 import archr
-
+import rex
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
@@ -15,7 +14,8 @@ def test_write_what_where_shadowstack():
     path = os.path.join(bin_location, "tests/cgc/write_what_where_shadow_stack")
 
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
-        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, "write_what_where_shadow_stack"))
+        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location,
+            "write_what_where_shadow_stack"))
         arsenal = crash.exploit()
         crash.project.loader.close()
 
