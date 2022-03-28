@@ -4,7 +4,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import nose
 import struct
 import logging
 
@@ -14,7 +13,6 @@ import colorguard
 from rex.vulnerability import Vulnerability
 from angr.state_plugins.trace_additions import FormatInfoStrToInt, FormatInfoDontConstrain
 from rex.exploit.cgc.type1.cgc_type1_shellcode_exploit import CGCType1ShellcodeExploit
-#from nose.plugins.attrib import attr
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
@@ -53,14 +51,14 @@ def test_legit_00001():
 
         arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
 
-        nose.tools.assert_true(len(arsenal.register_setters) >= 2)
-        nose.tools.assert_true(len(arsenal.leakers) >= 1)
+        assert len(arsenal.register_setters) >= 2
+        assert len(arsenal.leakers) >= 1
 
         for reg_setter in arsenal.register_setters:
-            nose.tools.assert_true(_do_pov_test(reg_setter))
+            assert _do_pov_test(reg_setter)
 
         for leaker in arsenal.leakers:
-            nose.tools.assert_true(_do_pov_test(leaker))
+            assert _do_pov_test(leaker)
 
 def test_legit_00003():
     # Test exploration and exploitation of legit_00003.
@@ -70,21 +68,21 @@ def test_legit_00003():
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
         crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'legit_00003'))
 
-        nose.tools.assert_true(crash.explorable())
-        nose.tools.assert_true(crash.one_of(Vulnerability.WRITE_WHAT_WHERE))
+        assert crash.explorable()
+        assert crash.one_of(Vulnerability.WRITE_WHAT_WHERE)
 
         crash.explore()
 
         arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
 
-        nose.tools.assert_true(len(arsenal.register_setters) >= 2)
-        nose.tools.assert_true(len(arsenal.leakers) >= 1)
+        assert len(arsenal.register_setters) >= 2
+        assert len(arsenal.leakers) >= 1
 
         for reg_setter in arsenal.register_setters:
-            nose.tools.assert_true(_do_pov_test(reg_setter))
+            assert _do_pov_test(reg_setter)
 
         for leaker in arsenal.leakers:
-            nose.tools.assert_true(_do_pov_test(leaker))
+            assert _do_pov_test(leaker)
 
 def break_controlled_printf():#L90
     # Test ability to turn controlled format string into Type 2 POV.
@@ -93,19 +91,19 @@ def break_controlled_printf():#L90
     binary = os.path.join(bin_location, "tests/i386/controlled_printf")
     crash = rex.Crash(binary, crash, rop_cache_path=os.path.join(cache_location, 'controlled_printf'))
 
-    nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_READ))
+    assert crash.one_of(Vulnerability.ARBITRARY_READ)
 
     flag_leaks = list(crash.point_to_flag())
 
-    nose.tools.assert_true(len(flag_leaks) >= 1)
+    assert len(flag_leaks) >= 1
 
     cg = colorguard.ColorGuard(binary, flag_leaks[0])
 
-    nose.tools.assert_true(cg.causes_leak())
+    assert cg.causes_leak()
 
     pov = cg.attempt_pov()
 
-    nose.tools.assert_true(_do_pov_test(pov, enable_randomness=False))
+    assert _do_pov_test(pov, enable_randomness=False)
 
 
 def test_shellcode_placement():
@@ -118,19 +116,21 @@ def test_shellcode_placement():
     with archr.targets.LocalTarget([path], target_os='cgc').build().start() as target:
         crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'shellcode_tester'))
 
-        arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register', 'circumstantially_set_register'})
+        arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory',
+            'rop_set_register', 'circumstantially_set_register'})
         exploit = [e for e in arsenal.register_setters if type(e) is CGCType1ShellcodeExploit][0]
 
         # make sure the shellcode was placed into the executable heap page
         heap_top = crash.state.solver.eval(crash.state.cgc.allocation_base)
-        nose.tools.assert_equal(struct.unpack("<I", exploit._raw_payload[-4:])[0] & 0xfffff000, heap_top)
-        exec_regions = list(filter(lambda a: crash.state.solver.eval(crash.state.memory.permissions(a)) & 0x4, crash.symbolic_mem))
+        assert struct.unpack("<I", exploit._raw_payload[-4:])[0] & 0xfffff000 == heap_top
+        exec_regions = list(filter(lambda a: crash.state.solver.eval(crash.state.memory.permissions(a)) & 0x4,
+            crash.symbolic_mem))
 
         # should just be two executable regions
-        nose.tools.assert_equal(len(exec_regions), 2)
+        assert len(exec_regions)== 2
 
         # only executable regions should be that one heap page and the stack, despite having more heap control and global control
-        nose.tools.assert_equal(sorted(exec_regions), sorted([0xb7ffb000, 0xbaaaaeec]))
+        assert sorted(exec_regions) == sorted([0xb7ffb000, 0xbaaaaeec])
 
 def test_boolector_solving():
     # Test boolector's ability to generate the correct values at pov runtime.
@@ -142,48 +142,49 @@ def test_boolector_solving():
 
         arsenal = crash.exploit(blacklist_techniques={'rop_leak_memory'})
 
-        nose.tools.assert_true(len(arsenal.register_setters) >= 3)
-        nose.tools.assert_true(len(arsenal.leakers) >= 1)
+        assert len(arsenal.register_setters) >= 3
+        assert len(arsenal.leakers) >= 1
 
         for reg_setter in arsenal.register_setters:
-            nose.tools.assert_true(_do_pov_test(reg_setter))
+            assert _do_pov_test(reg_setter)
 
         for leaker in arsenal.leakers:
-            nose.tools.assert_true(_do_pov_test(leaker))
+            assert _do_pov_test(leaker)
 
 def break_cpp_vptr_smash():#L165
     # Test detection of 'arbitrary-read' vulnerability type, exploration of the crash, and exploitation post-exploration
 
     crash = b"A" * 512
-    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_vptr_smash"), crash, rop_cache_path=os.path.join(cache_location, 'vuln_vptr_smash'))
+    crash = rex.Crash(os.path.join(bin_location, "tests/i386/vuln_vptr_smash"),
+        crash, rop_cache_path=os.path.join(cache_location, 'vuln_vptr_smash'))
 
     # this should just tell us that we have an arbitrary-read and that the crash type is explorable
     # but not exploitable
-    nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_READ))
-    nose.tools.assert_false(crash.exploitable())
-    nose.tools.assert_true(crash.explorable())
+    assert crash.one_of(Vulnerability.ARBITRARY_READ)
+    assert not crash.exploitable()
+    assert crash.explorable()
 
     crash.explore()
     # after exploring the crash we should see that it is exploitable
-    nose.tools.assert_true(crash.exploitable)
-    nose.tools.assert_true(crash.state.solver.symbolic(crash.state.regs.pc))
+    assert crash.exploitable
+    assert crash.state.solver.symbolic(crash.state.regs.pc)
 
     # let's generate some exploits for it
     arsenal = crash.exploit()
 
     # make sure we have three register setting exploits (one for each technique)
-    nose.tools.assert_true(len(arsenal.register_setters) >= 2)
+    assert len(arsenal.register_setters) >= 2
 
     # make sure we can also generate some leakers, should be rop and shellcode at this point
-    nose.tools.assert_true(len(arsenal.leakers) >= 2)
+    assert len(arsenal.leakers) >= 2
 
     # make sure the test succeeds on every register setter
     for reg_setter in arsenal.register_setters:
-        nose.tools.assert_true(_do_pov_test(reg_setter))
+        assert _do_pov_test(reg_setter)
 
     # make sure the test succeeds on every leaker
     for leaker in arsenal.leakers:
-        nose.tools.assert_true(_do_pov_test(leaker))
+        assert _do_pov_test(leaker)
 
     _check_arsenal_has_send(arsenal)
 
@@ -196,7 +197,8 @@ def test_linux_stacksmash_64():
     ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
     path = os.path.join(lib_path, "vuln_stacksmash")
     with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='x86_64').build().start() as target:
-        crash = rex.Crash(target, crash=inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
+        crash = rex.Crash(target, crash=inp, fast_mode=True,
+            rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
 
         exploit = crash.exploit(blacklist_techniques={'ret2libc'})
 
@@ -215,7 +217,8 @@ def test_linux_stacksmash_32():
     ld_path = os.path.join(lib_path, "ld-linux.so.2")
     path = os.path.join(lib_path, "vuln_stacksmash")
     with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='i386').build().start() as target:
-        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'))
+        crash = rex.Crash(target, inp, fast_mode=True,
+            rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'))
 
         exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register', 'ret2libc'})
 
@@ -239,8 +242,9 @@ def test_linux_network_stacksmash_64():
                                    target_arch='x86_64',
                                    ipv4_address="127.0.0.1",
                                    tcp_ports=(port,)).build().start() as target:
-        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'), aslr=False,
-                          input_type=rex.enums.CrashInputType.TCP, port=port)
+        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'),
+            aslr=False,
+            input_type=rex.enums.CrashInputType.TCP, port=port)
 
         exploit = crash.exploit(cmd=b"echo hello", blacklist_techniques={'ret2libc'})
 
@@ -288,16 +292,16 @@ def test_cgc_type1_rop_stacksmash():
         arsenal = crash.exploit()
 
         # make sure we can control ecx, edx, ebx, ebp, esi, and edi with rop
-        nose.tools.assert_true(len(arsenal.register_setters) >= 3)
-        nose.tools.assert_true(len(arsenal.leakers) >= 2)
+        assert len(arsenal.register_setters) >= 3
+        assert len(arsenal.leakers) >= 2
 
         # make sure the test succeeds on every register setter
         for reg_setter in arsenal.register_setters:
-            nose.tools.assert_true(_do_pov_test(reg_setter))
+            assert _do_pov_test(reg_setter)
 
         # make sure the test succeeds on every leaker
         for leaker in arsenal.leakers:
-            nose.tools.assert_true(_do_pov_test(leaker))
+            assert _do_pov_test(leaker)
 
 
 def test_exploit_yielding():
@@ -314,30 +318,31 @@ def test_exploit_yielding():
         for exploit in crash.yield_exploits():
             leakers += 1 if exploit.cgc_type == 2 else 0
             register_setters += 1 if exploit.cgc_type == 1 else 0
-            nose.tools.assert_true(_do_pov_test(exploit))
+            assert _do_pov_test(exploit)
 
         # make sure we can generate a few different exploits
-        nose.tools.assert_true(register_setters >= 3)
-        nose.tools.assert_true(leakers >= 2)
+        assert register_setters >= 3
+        assert leakers >= 2
 
 def _do_arbitrary_transmit_test_for(binary):
     inp = b"A"*0x24
     path = os.path.join(bin_location, binary)
 
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
-        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, os.path.basename(binary)))
+        crash = rex.Crash(target, inp, fast_mode=True,
+            rop_cache_path=os.path.join(cache_location, os.path.basename(binary)))
         zp = crash.state.get_plugin("zen_plugin")
-        nose.tools.assert_true(len(zp.controlled_transmits) == 1)
+        assert len(zp.controlled_transmits) == 1
 
         flag_leaks = list(crash.point_to_flag())
 
-        nose.tools.assert_true(len(flag_leaks) >= 1)
+        assert len(flag_leaks) >= 1
 
         for ptfi in flag_leaks:
             cg = colorguard.ColorGuard(path, ptfi)
-            nose.tools.assert_true(cg.causes_leak())
+            assert cg.causes_leak()
             pov = cg.attempt_exploit()
-            nose.tools.assert_true(pov.test_binary())
+            assert pov.test_binary()
 
 def test_arbitrary_transmit():
     # Test our ability to exploit an arbitrary transmit
@@ -352,7 +357,7 @@ def break_KPRCA_00057(): # L284
     # set up hooks
     format_infos = []
     format_infos.append(FormatInfoStrToInt(0x8049e90, "based_atoi_8", str_arg_num=0, base=8,
-                       base_arg=None, allows_negative=False))
+                        base_arg=None, allows_negative=False))
     format_infos.append(FormatInfoStrToInt(0x804b3b0, "strtol", str_arg_num=0, base=None,
                        base_arg=2, allows_negative=False))
     format_infos.append(FormatInfoStrToInt(0x804b160, "strtol", str_arg_num=0, base=None,
@@ -360,19 +365,20 @@ def break_KPRCA_00057(): # L284
     format_infos.append(FormatInfoDontConstrain(0x8049e90, "fdprintf", 1))
 
     binary = os.path.join(bin_location, "tests/cgc/KPRCA_00057")
-    crash = rex.Crash(binary, crash, format_infos=format_infos, rop_cache_path=os.path.join(cache_location, 'KPRCA_00057_crash'))
+    crash = rex.Crash(binary, crash, format_infos=format_infos,
+        rop_cache_path=os.path.join(cache_location, 'KPRCA_00057_crash'))
 
-    nose.tools.assert_true(crash.one_of(Vulnerability.ARBITRARY_TRANSMIT))
+    assert crash.one_of(Vulnerability.ARBITRARY_TRANSMIT)
 
     flag_leaks = list(crash.point_to_flag())
 
-    nose.tools.assert_true(len(flag_leaks) >= 1)
+    assert len(flag_leaks) >= 1
 
     cg = colorguard.ColorGuard(binary, flag_leaks[0])
     cg.causes_leak()
     pov = cg.attempt_pov()
 
-    nose.tools.assert_true(_do_pov_test(pov))
+    assert _do_pov_test(pov)
 
 def test_arbitrary_transmit_no_crash():
     # Test our ability to exploit an arbitrary transmit which does not cause a crash
@@ -386,22 +392,23 @@ def test_reconstraining():
     path = os.path.join(bin_location, "tests/cgc/PIZZA_00003")
 
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
-        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'PIZZA_00003'))
+        crash = rex.Crash(target, inp, fast_mode=True,
+            rop_cache_path=os.path.join(cache_location, 'PIZZA_00003'))
 
         ptfi = list(crash.point_to_flag())
-        nose.tools.assert_true(len(ptfi) >= 2)
+        assert len(ptfi) >= 2
 
         # test point to flag #1
         cg = colorguard.ColorGuard(path, ptfi[0])
         x = cg.attempt_exploit()
-        nose.tools.assert_not_equal(x, None)
-        nose.tools.assert_true(_do_pov_test(x))
+        assert x is not None
+        assert _do_pov_test(x)
 
         # test point to flag #2
         cg = colorguard.ColorGuard(path, ptfi[1])
         x = cg.attempt_exploit()
-        nose.tools.assert_not_equal(x, None)
-        nose.tools.assert_true(_do_pov_test(x))
+        assert x is not None
+        assert _do_pov_test(x)
 
 def test_cromu71():
     inp = b'3&\x1b\x17/\x12\x1b\x1e]]]]]]]]]]]]]]]]]]]]\n\x1e\x7f\xffC^\n'
@@ -413,13 +420,14 @@ def test_cromu71():
                                            base_arg=None, allows_negative=True))
 
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
-        crash = rex.Crash(target, inp, fast_mode=True, rop_cache_path=os.path.join(cache_location, 'simplified_CROMU_00071'))
+        crash = rex.Crash(target, inp, fast_mode=True,
+            rop_cache_path=os.path.join(cache_location, 'simplified_CROMU_00071'))
 
         # let's generate some exploits for it
         arsenal = crash.exploit(blacklist_techniques={'rop_set_register', 'rop_leak_memory'})
 
         # make sure it works
-        nose.tools.assert_true(_do_pov_test(arsenal.best_type1))
+        assert _do_pov_test(arsenal.best_type1)
 
 def test_halfway_tracing():
     inp = b'A'*100
@@ -430,8 +438,8 @@ def test_halfway_tracing():
                           rop_cache_path=os.path.join(cache_location, 'halfway_stack_smash'))
         exp = crash.exploit()
 
-        nose.tools.assert_true('rop_to_system' in exp.arsenal)
-        nose.tools.assert_true('rop_register_control' in exp.arsenal)
+        assert 'rop_to_system' in exp.arsenal
+        assert 'rop_register_control' in exp.arsenal
 
 def run_all():
     functions = globals()
