@@ -21,7 +21,7 @@ setup(
         'tracer',
         'povsim',
         'compilerex',
-        'angr-pwntools',
+        'pwntools',
     ],
     package_data={
         'rex': ['rex/scripter/templates/*']
