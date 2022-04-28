@@ -24,6 +24,6 @@ setup(
         'pwntools',
     ],
     package_data={
-        'rex': ['rex/scripter/templates/*']
+        'rex.scripter.templates': ['*.j2']
     },
 )
