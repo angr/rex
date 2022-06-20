@@ -13,6 +13,7 @@ from archr.analyzers.angr_state import SimArchrMount
 from archr.analyzers.qemu_tracer import QEMUTracerError
 from angr.storage.file import SimFileDescriptorDuplex
 from cle.backends import ELFCore
+from claripy.annotation import SimplificationAvoidanceAnnotation
 
 from . import CrashTracer, CrashTracerError, add_options, remove_options
 from ..enums import CrashInputType
@@ -21,11 +22,13 @@ from ..exploit.actions import RexSendAction
 if TYPE_CHECKING:
     from angr import Project
 
-
 l = logging.getLogger(__name__)
 
 DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x26, 0x2b, 0x2d, 0x3b]
 
+class ASTTaint(SimplificationAvoidanceAnnotation):
+    def __init__(self):
+        pass
 
 class DumbTracer(CrashTracer):
     """
@@ -66,7 +69,16 @@ class DumbTracer(CrashTracer):
             add_options=add_options
             )
 
-        # step 1 single instruction which is the crashing instruction
+        # taint the registers and then step one single instruction which is the crashing instruction
+        # then we can use the taint to infer which register caused the crash
+        # This assumes that the register value directly comes from the input
+
+        # step 1: taint the registers
+        taint = ASTTaint()
+        for x in state.project.arch.registers:
+            setattr(state.regs, x, getattr(state.regs, x).annotate(taint))
+
+        # step 2: step one single instruction
         block = state.block()
         insn = block.capstone.insns[0]
         insn_end = block.addr + insn.insn.size
@@ -75,14 +87,19 @@ class DumbTracer(CrashTracer):
         assert len(simgr.active) == 1
         crashing_state = simgr.active[0]
 
-        # extracting info about the crashing memory access
+        # step 3: extracting info about the crashing memory access
         for act in crashing_state.history.actions:
             if act.type == 'mem':
                 break
         else:
             raise CrashTracerError("There is no memory access in the last instruction" +
                                    "why does it crash?")
-        bad_ptr = act.addr.ast # pylint:disable=undefined-loop-variable
+        for ast in act.addr.ast.leaf_asts():
+            if ast.annotations:
+                break
+        else:
+            raise CrashTracerError("Investigation error! The crash is not caused by any register!")
+        bad_ptr = ast
         bad_data = state.solver.eval(bad_ptr, cast_to=bytes)
 
         # find an address in rw region with no dangerous bytes
