@@ -152,29 +152,6 @@ class DumbTracer(CrashTracer):
         return self._identify_crash_addr(testcase, channel, pre_fire_hook,
                                          delay=delay, actions=self.crash.actions, investigate=False)
 
-    def _fixate_pointers(self, r, project):
-
-        # MIPS-specific hack:
-        # In certain MIPS binaries, the arguments are not copied to the stack frame of the current function and are
-        # directly used in the current function. Hence, as soon as we overflow past the stored return address on the
-        # stack, we start overflowing these arguments. If any of these arguments are used between the overflowing point
-        # and the returning point, corrupted arguments may lead the program to crash.
-        # Hence, this hack finds out about pointers in the user input after the controlled location, and then keep
-        # these pointers unchanged.
-        if project.arch.name == "MIPS32":
-            struct_fmt = project.arch.struct_fmt()
-            for act in iter(a_ for a_ in self.crash.actions if isinstance(a_, RexSendAction)):
-                for i in range(0, len(act.data)):
-                    chopped = act.data[i : i + project.arch.bytes]
-                    if len(chopped) != project.arch.bytes:
-                        continue
-                    chopped_v = struct.unpack(struct_fmt, chopped)[0]
-                    if project.loader.find_object_containing(chopped_v):
-                        # found a pointer!
-                        if chopped_v not in self._patch_strs:
-                            l.debug("Found a pointer in the input to keep untouched: %#x.", chopped_v)
-                            self._patch_strs.append(chopped)
-
     def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0, actions=None, investigate=True):
         """
         run the target once to identify crash_addr
@@ -195,8 +172,6 @@ class DumbTracer(CrashTracer):
             if investigate:
                 return self._investigate_crash(r, testcase, channel, pre_fire_hook, delay=delay)
             raise CrashTracerError("Not an IP control vulnerability!")
-
-        self._fixate_pointers(r, project)
 
         # destroy the temporary project bow and the project
         self.angr_project_bow.project = None
