@@ -447,7 +447,7 @@ class DumbTracer(CrashTracer):
             # find all previously identified byte chunks that should not be touched
             patchstr_and_offset: List[Tuple[int,bytes]] = [ ]
             for patch_str in self._patch_strs:
-                offsets = [ m.start() for m in re.finditer(patch_str, act.data) ]
+                offsets = [ m.start() for m in re.finditer(re.escape(patch_str), act.data) ]
                 patchstr_and_offset += [ (off, patch_str) for off in offsets ]
 
             # replace several bytes before the end of the controlled region
