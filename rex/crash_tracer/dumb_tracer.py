@@ -1,7 +1,6 @@
 import os
 import copy
 import re
-import struct
 import logging
 from typing import List, Tuple, TYPE_CHECKING
 
@@ -27,6 +26,9 @@ l = logging.getLogger(__name__)
 DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x26, 0x2b, 0x2d, 0x3b, 0xff]
 
 class ASTTaint(SimplificationAvoidanceAnnotation):
+    """
+    A dummy taint for input-to-state analysis
+    """
     def __init__(self):
         pass
 
@@ -369,7 +371,7 @@ class DumbTracer(CrashTracer):
             state.memory.store(addr, patch_str)
 
         # to simulate a tracing, the bad bytes constraints should be applied to state here
-        self._bad_bytes = self.identify_bad_bytes(self.crash)
+        self._bad_bytes = self.identify_bad_bytes()
         for i in range(self._max_len):
             for c in self._bad_bytes:
                 state.solver.add(sim_chunk.get_byte(i) != c)
@@ -488,7 +490,7 @@ class DumbTracer(CrashTracer):
             return False
         return True
 
-    def identify_bad_bytes(self, crash):
+    def identify_bad_bytes(self):
         """
         dumb tracer does not have information about the constraints on the input
         so it has to use concrete execution to identify the bad bytes through heuristics
@@ -501,7 +503,7 @@ class DumbTracer(CrashTracer):
 
         bad_bytes = []
         for c in DANGEROUS_BYTES:
-            ret = self._is_bad_byte(crash, c)
+            ret = self._is_bad_byte(self.crash, c)
             if ret:
                 l.debug("%#x is a bad byte!", c)
                 bad_bytes.append(c)
