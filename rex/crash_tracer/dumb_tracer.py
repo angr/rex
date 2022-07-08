@@ -1,7 +1,6 @@
 import os
 import copy
 import re
-import struct
 import logging
 from typing import List, Tuple, TYPE_CHECKING
 
@@ -13,6 +12,7 @@ from archr.analyzers.angr_state import SimArchrMount
 from archr.analyzers.qemu_tracer import QEMUTracerError
 from angr.storage.file import SimFileDescriptorDuplex
 from cle.backends import ELFCore
+from claripy.annotation import SimplificationAvoidanceAnnotation
 
 from . import CrashTracer, CrashTracerError, add_options, remove_options
 from ..enums import CrashInputType
@@ -21,11 +21,16 @@ from ..exploit.actions import RexSendAction
 if TYPE_CHECKING:
     from angr import Project
 
-
 l = logging.getLogger(__name__)
 
-DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x26, 0x2b, 0x2d, 0x3b]
+DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x26, 0x2b, 0x2d, 0x3b, 0xff]
 
+class ASTTaint(SimplificationAvoidanceAnnotation):
+    """
+    A dummy taint for input-to-state analysis
+    """
+    def __init__(self):
+        pass
 
 class DumbTracer(CrashTracer):
     """
@@ -66,7 +71,16 @@ class DumbTracer(CrashTracer):
             add_options=add_options
             )
 
-        # step 1 single instruction which is the crashing instruction
+        # taint the registers and then step one single instruction which is the crashing instruction
+        # then we can use the taint to infer which register caused the crash
+        # This assumes that the register value directly comes from the input
+
+        # step 1: taint the registers
+        taint = ASTTaint()
+        for x in state.project.arch.registers:
+            setattr(state.regs, x, getattr(state.regs, x).annotate(taint))
+
+        # step 2: step one single instruction
         block = state.block()
         insn = block.capstone.insns[0]
         insn_end = block.addr + insn.insn.size
@@ -75,14 +89,19 @@ class DumbTracer(CrashTracer):
         assert len(simgr.active) == 1
         crashing_state = simgr.active[0]
 
-        # extracting info about the crashing memory access
+        # step 3: extracting info about the crashing memory access
         for act in crashing_state.history.actions:
             if act.type == 'mem':
                 break
         else:
             raise CrashTracerError("There is no memory access in the last instruction" +
                                    "why does it crash?")
-        bad_ptr = act.addr.ast # pylint:disable=undefined-loop-variable
+        for ast in act.addr.ast.leaf_asts():
+            if ast.annotations:
+                break
+        else:
+            raise CrashTracerError("Investigation error! The crash is not caused by any register!")
+        bad_ptr = ast
         bad_data = state.solver.eval(bad_ptr, cast_to=bytes)
 
         # find an address in rw region with no dangerous bytes
@@ -135,37 +154,6 @@ class DumbTracer(CrashTracer):
         return self._identify_crash_addr(testcase, channel, pre_fire_hook,
                                          delay=delay, actions=self.crash.actions, investigate=False)
 
-    def _fixate_pointers(self, r):
-
-        self._init_angr_project_bow(self.tracer_bow.target)
-        project = self.angr_project_bow.fire(core_path=r.core_path)
-        project.loader.main_object = project.loader.elfcore_object
-
-        # MIPS-specific hack:
-        # In certain MIPS binaries, the arguments are not copied to the stack frame of the current function and are
-        # directly used in the current function. Hence, as soon as we overflow past the stored return address on the
-        # stack, we start overflowing these arguments. If any of these arguments are used between the overflowing point
-        # and the returning point, corrupted arguments may lead the program to crash.
-        # Hence, this hack finds out about pointers in the user input after the controlled location, and then keep
-        # these pointers unchanged.
-        if project.arch.name == "MIPS32":
-            struct_fmt = project.arch.struct_fmt()
-            for act in iter(a_ for a_ in self.crash.actions if isinstance(a_, RexSendAction)):
-                for i in range(0, len(act.data)):
-                    chopped = act.data[i : i + project.arch.bytes]
-                    if len(chopped) != project.arch.bytes:
-                        continue
-                    chopped_v = struct.unpack(struct_fmt, chopped)[0]
-                    if project.loader.find_object_containing(chopped_v):
-                        # found a pointer!
-                        if chopped_v not in self._patch_strs:
-                            l.debug("Found a pointer in the input to keep untouched: %#x.", chopped_v)
-                            self._patch_strs.append(chopped)
-
-        # destroy the temporary project bow and the project
-        self.angr_project_bow.project = None
-        self.angr_project_bow = None
-
     def _identify_crash_addr(self, testcase, channel, pre_fire_hook, delay=0, actions=None, investigate=True):
         """
         run the target once to identify crash_addr
@@ -177,13 +165,19 @@ class DumbTracer(CrashTracer):
         if not r.crashed:
             raise CrashTracerError("The target is not crashed inside QEMU!")
 
-        # the target crashes at memory accessing
-        if r.crash_address in r.trace:
+        # investigate the crash if the target crashes at an uncontrolled address
+        # likely because of memory access
+        self._init_angr_project_bow(self.tracer_bow.target)
+        project = self.angr_project_bow.fire(core_path=r.core_path)
+        project.loader.main_object = project.loader.elfcore_object
+        if project.loader.find_object_containing(r.crash_address):
             if investigate:
                 return self._investigate_crash(r, testcase, channel, pre_fire_hook, delay=delay)
             raise CrashTracerError("Not an IP control vulnerability!")
 
-        self._fixate_pointers(r)
+        # destroy the temporary project bow and the project
+        self.angr_project_bow.project = None
+        self.angr_project_bow = None
 
         crash_block_addr = r.trace[-1]
         return crash_block_addr, r.trace.count(crash_block_addr)
@@ -377,7 +371,7 @@ class DumbTracer(CrashTracer):
             state.memory.store(addr, patch_str)
 
         # to simulate a tracing, the bad bytes constraints should be applied to state here
-        self._bad_bytes = self.identify_bad_bytes(self.crash)
+        self._bad_bytes = self.identify_bad_bytes()
         for i in range(self._max_len):
             for c in self._bad_bytes:
                 state.solver.add(sim_chunk.get_byte(i) != c)
@@ -455,7 +449,7 @@ class DumbTracer(CrashTracer):
             # find all previously identified byte chunks that should not be touched
             patchstr_and_offset: List[Tuple[int,bytes]] = [ ]
             for patch_str in self._patch_strs:
-                offsets = [ m.start() for m in re.finditer(patch_str, act.data) ]
+                offsets = [ m.start() for m in re.finditer(re.escape(patch_str), act.data) ]
                 patchstr_and_offset += [ (off, patch_str) for off in offsets ]
 
             # replace several bytes before the end of the controlled region
@@ -496,7 +490,7 @@ class DumbTracer(CrashTracer):
             return False
         return True
 
-    def identify_bad_bytes(self, crash):
+    def identify_bad_bytes(self):
         """
         dumb tracer does not have information about the constraints on the input
         so it has to use concrete execution to identify the bad bytes through heuristics
@@ -509,7 +503,7 @@ class DumbTracer(CrashTracer):
 
         bad_bytes = []
         for c in DANGEROUS_BYTES:
-            ret = self._is_bad_byte(crash, c)
+            ret = self._is_bad_byte(self.crash, c)
             if ret:
                 l.debug("%#x is a bad byte!", c)
                 bad_bytes.append(c)
