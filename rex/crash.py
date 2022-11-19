@@ -361,8 +361,6 @@ class CommCrash(SimCrash):
         assert not self.pov_file, "POV file is not supported anymore!"
         assert actions or crash_input
 
-        channel = self.input_type_to_channel(input_type)
-
         if actions:
             crash_input = b''
             sim_input = []
@@ -372,6 +370,7 @@ class CommCrash(SimCrash):
                     sim_input.append(act.sim_data)
             sim_input = claripy.Concat(*sim_input)
         else:
+            channel = self.input_type_to_channel(input_type)
             open_act = RexOpenChannelAction(channel_name=channel)
             send_act = RexSendAction(crash_input, channel_name=channel)
             actions = [open_act, send_act]
@@ -546,11 +545,14 @@ class CommCrash(SimCrash):
         self._test_case = test_case
         return channel, test_case
 
-    @staticmethod
-    def input_type_to_channel(input_type):
+    def input_type_to_channel(self, input_type):
         channel = Crash._input_type_to_channel_type(input_type)
-        if channel != "stdio":
-            channel += ":0"
+        if channel.startswith("tcp"):
+            idx = self.target.tcp_ports.index(self.target_port)
+            channel += f":{idx}"
+        elif channel.startswith("udp"):
+            idx = self.target.udp_ports.index(self.target_port)
+            channel += f":{idx}"
         return channel
 
     @staticmethod
