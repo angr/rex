@@ -316,7 +316,7 @@ class DumbTracer(CrashTracer):
             crashing_state.memory.load(search_start - max_backward_buffer_size, max_backward_buffer_size),
             cast_to=bytes,
         )
-        for i in range(word_size, len(data), word_size):
+        for i in range(word_size, len(data)+word_size, word_size):
             if data[-i:] != self.testcase[marker_idx - i : marker_idx]:
                 max_len_backward = i - word_size
                 break
