@@ -948,6 +948,7 @@ class Crash(CommCrash):
     def copy(self):
         cp = Crash.__new__(Crash)
         cp.target = self.target
+        cp.target_port = self.target_port
         cp.binary = self.binary
         cp.libc_binary = self.libc_binary
         cp.tracer = self.tracer
