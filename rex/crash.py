@@ -318,17 +318,17 @@ class CommCrash(SimCrash):
         if trace_mode != TraceMode.DUMB and actions:
             raise NotImplementedError("actions only support dumb tracer at the moment")
 
-        # input related, ensure crash_input is a list of input
-        # ensure actions are defined
-        self.pov_file = pov_file
-        self.crash_input, self.actions, self.sim_input = self._input_preparation(crash, actions, input_type)
-
         # communication related
         self.target = target # type: archr.targets.Target
         self.input_type = input_type
         self.target_port = port
         self.delay = delay
         self.pre_fire_hook = pre_fire_hook
+
+        # input related, ensure crash_input is a list of input
+        # ensure actions are defined
+        self.pov_file = pov_file
+        self.crash_input, self.actions, self.sim_input = self._input_preparation(crash, actions, input_type)
 
         self.binary = self.target.resolve_local_path(self.target.target_path)
         self._test_case = None
@@ -1012,7 +1012,7 @@ class Crash(CommCrash):
         self._triage_crash()
 
         l.info("Identifying bad_bytes")
-        self._bad_bytes = self.tracer.identify_bad_bytes(self)
+        self._bad_bytes = self.tracer.identify_bad_bytes()
         l.debug("idenfity bad bytes: %s", [hex(x) for x in self._bad_bytes])
 
     def _explore_arbitrary_read(self, path_file=None):
