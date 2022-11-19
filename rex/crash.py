@@ -318,17 +318,17 @@ class CommCrash(SimCrash):
         if trace_mode != TraceMode.DUMB and actions:
             raise NotImplementedError("actions only support dumb tracer at the moment")
 
-        # input related, ensure crash_input is a list of input
-        # ensure actions are defined
-        self.pov_file = pov_file
-        self.crash_input, self.actions, self.sim_input = self._input_preparation(crash, actions, input_type)
-
         # communication related
         self.target = target # type: archr.targets.Target
         self.input_type = input_type
         self.target_port = port
         self.delay = delay
         self.pre_fire_hook = pre_fire_hook
+
+        # input related, ensure crash_input is a list of input
+        # ensure actions are defined
+        self.pov_file = pov_file
+        self.crash_input, self.actions, self.sim_input = self._input_preparation(crash, actions, input_type)
 
         self.binary = self.target.resolve_local_path(self.target.target_path)
         self._test_case = None
@@ -361,8 +361,6 @@ class CommCrash(SimCrash):
         assert not self.pov_file, "POV file is not supported anymore!"
         assert actions or crash_input
 
-        channel = self.input_type_to_channel(input_type)
-
         if actions:
             crash_input = b''
             sim_input = []
@@ -372,6 +370,7 @@ class CommCrash(SimCrash):
                     sim_input.append(act.sim_data)
             sim_input = claripy.Concat(*sim_input)
         else:
+            channel = self.input_type_to_channel(input_type)
             open_act = RexOpenChannelAction(channel_name=channel)
             send_act = RexSendAction(crash_input, channel_name=channel)
             actions = [open_act, send_act]
@@ -546,11 +545,14 @@ class CommCrash(SimCrash):
         self._test_case = test_case
         return channel, test_case
 
-    @staticmethod
-    def input_type_to_channel(input_type):
+    def input_type_to_channel(self, input_type):
         channel = Crash._input_type_to_channel_type(input_type)
-        if channel != "stdio":
-            channel += ":0"
+        if channel.startswith("tcp"):
+            idx = self.target.tcp_ports.index(self.target_port)
+            channel += f":{idx}"
+        elif channel.startswith("udp"):
+            idx = self.target.udp_ports.index(self.target_port)
+            channel += f":{idx}"
         return channel
 
     @staticmethod
@@ -946,6 +948,7 @@ class Crash(CommCrash):
     def copy(self):
         cp = Crash.__new__(Crash)
         cp.target = self.target
+        cp.target_port = self.target_port
         cp.binary = self.binary
         cp.libc_binary = self.libc_binary
         cp.tracer = self.tracer
@@ -1010,7 +1013,7 @@ class Crash(CommCrash):
         self._triage_crash()
 
         l.info("Identifying bad_bytes")
-        self._bad_bytes = self.tracer.identify_bad_bytes(self)
+        self._bad_bytes = self.tracer.identify_bad_bytes()
         l.debug("idenfity bad bytes: %s", [hex(x) for x in self._bad_bytes])
 
     def _explore_arbitrary_read(self, path_file=None):
