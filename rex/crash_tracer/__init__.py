@@ -39,6 +39,30 @@ class CrashTracer:
         self._is_cgc = is_cgc
         self.cgc_flag_page_magic = None
 
+    def identify_bad_bytes(self):
+        """
+        identify the bad bytes by inspecting constraints in an unconstrained state
+        the extracted bad bytes are used to help angrop filter gadgets
+        """
+        state = self.crash.state
+
+        bad_bytes = []
+        sim_bytes = []
+
+        # in case its a partial IP overwrite
+        for i in range(state.project.arch.bytes):
+            byte = state.ip.get_byte(i)
+            if len(state.solver.eval_upto(byte, 2)) == 2:
+                sim_bytes.append(byte)
+
+        # a byte is a bad byte if none of the bytes in
+        # the pc can be that byte
+        for c in range(0x100):
+            if any(state.solver.satisfiable(extra_constraints=[c==x]) for x in sim_bytes):
+                continue
+            bad_bytes.append(c)
+        return bad_bytes
+
     @abstractmethod
     def concrete_trace(self, testcase, channel, pre_fire_hook, delay=0, actions=None, taint=None):
         """
@@ -78,31 +102,6 @@ class CrashTracer:
     def _channel_to_input_type(channel):
         s = channel.split(":")[0]
         return CrashInputType.STDIN if s == 'stdio' else s
-
-    @staticmethod
-    def identify_bad_bytes(crash):
-        """
-        identify the bad bytes by inspecting constraints in an unconstrained state
-        the extracted bad bytes are used to help angrop filter gadgets
-        """
-        state = crash.state
-
-        bad_bytes = []
-        sim_bytes = []
-
-        # in case its a partial IP overwrite
-        for i in range(state.project.arch.bytes):
-            byte = state.ip.get_byte(i)
-            if len(state.solver.eval_upto(byte, 2)) == 2:
-                sim_bytes.append(byte)
-
-        # a byte is a bad byte if none of the bytes in
-        # the pc can be that byte
-        for c in range(0x100):
-            if any(state.solver.satisfiable(extra_constraints=[c==x]) for x in sim_bytes):
-                continue
-            bad_bytes.append(c)
-        return bad_bytes
 
 from ..enums import CrashInputType
 
