@@ -336,7 +336,10 @@ class CommCrash(SimCrash):
 
         # tracing related
         if tracer_opts is None: tracer_opts = {}
-        tracer_opts['tracer_bow'] = tracer_opts.pop("tracer_bow", None) or archr.arsenal.QEMUTracerBow(self.target)
+        tracer_opts['tracer_bow'] = tracer_opts.pop("tracer_bow", None)
+        if not tracer_opts['tracer_bow']: # use QEMUTracer by default
+            qemu_args = tracer_opts.pop('qemu_args', None)
+            tracer_opts['tracer_bow'] = archr.arsenal.QEMUTracerBow(self.target, qemu_args=qemu_args)
         self._tracer_opts = tracer_opts
 
         is_cgc = self.target.target_os == 'cgc'
