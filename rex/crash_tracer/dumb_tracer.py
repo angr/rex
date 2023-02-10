@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 l = logging.getLogger(__name__)
 
-DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x26, 0x2b, 0x2d, 0x3b, 0xff]
+DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x26, 0x2b, 0x2d, 0x3b, 0x3f, 0xff]
 
 class ASTTaint(SimplificationAvoidanceAnnotation):
     """
@@ -275,7 +275,7 @@ class DumbTracer(CrashTracer):
         word_size = self.project.arch.bytes
 
         # we operate on concrete memory so far, so it is safe to load and eval concrete memory
-        data = crashing_state.solver.eval(crashing_state.memory.load(self._save_ip_addr, 0x400), cast_to=bytes)
+        data = crashing_state.solver.eval(crashing_state.memory.load(self._save_ip_addr, len(self.testcase)), cast_to=bytes)
         assert data[:word_size] in self.testcase, "PC is not overwritten!"
 
         # identify marker from the original input on stack
