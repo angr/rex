@@ -425,7 +425,8 @@ class DumbTracer(CrashTracer):
 
         # prepare new input
         inp = bytes([bad_byte]*(self._max_len - (self._save_ip_addr - self._input_addr)))
-        taint_str = b'\xef\xbe\xad\xde\xbe\xba\xfe\xca'
+        # taint string should be something unique and not contain bad bytes
+        taint_str = b'DeAdB33F' # b'\xef\xbe\xad\xde\xbe\xba\xfe\xca'
 
         # prepare new actions
         new_actions = []
