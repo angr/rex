@@ -1017,7 +1017,7 @@ class Crash(CommCrash):
 
         l.info("Identifying bad_bytes")
         self._bad_bytes = self.tracer.identify_bad_bytes()
-        l.debug("idenfity bad bytes: %s", [hex(x) for x in self._bad_bytes])
+        l.debug("identify bad bytes: [%s]", ', '.join([hex(x) for x in self._bad_bytes]))
 
     def _explore_arbitrary_read(self, path_file=None):
         # crash type was an arbitrary-read, let's point the violating address at a
