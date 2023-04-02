@@ -290,7 +290,7 @@ class CommCrash(SimCrash):
     def __init__(self, target, crash=None, pov_file=None, actions=None,
                  trace_mode=TraceMode.FULL_SYMBOLIC, tracer_opts=None,
                  input_type=CrashInputType.STDIN, port=None,
-                 delay=0, pre_fire_hook=None,
+                 delay=0, pre_fire_hook=None, shell=False,
                  format_infos=None, **kwargs):
         """
         :param target:              archr Target that contains the binary that crashed.
@@ -306,6 +306,7 @@ class CommCrash(SimCrash):
                                     several seconds before trying to set up connection
         :param pre_fire_hook:       function hook that is executed after the target is launched before the input is sent
                                     to the target
+        :param shell:               Used to tell subprocess to run with shell=True or shell=False
         :param actions:             the actions to interact with the target, if specified, crash or pov_file will be ignored
                                     during interaction with the target
         :param format_infos:        A list of atoi FormatInfo objects that should
@@ -339,7 +340,7 @@ class CommCrash(SimCrash):
         tracer_opts['tracer_bow'] = tracer_opts.pop("tracer_bow", None)
         if not tracer_opts['tracer_bow']: # use QEMUTracer by default
             qemu_args = tracer_opts.pop('qemu_args', None)
-            tracer_opts['tracer_bow'] = archr.arsenal.QEMUTracerBow(self.target, qemu_args=qemu_args)
+            tracer_opts['tracer_bow'] = archr.arsenal.QEMUTracerBow(self.target, qemu_args=qemu_args, shell=shell)
         self._tracer_opts = tracer_opts
 
         is_cgc = self.target.target_os == 'cgc'
