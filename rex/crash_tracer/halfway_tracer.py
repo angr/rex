@@ -37,7 +37,7 @@ class HalfwayTracer(CrashTracer):
         self._init_angr_project_bow(target)
         project = self.angr_project_bow.fire(core_path=self.trace_result.halfway_core_path)
 
-        project.loader.main_object = project.loader.elfcore_object._main_object
+        project.loader._main_object = project.loader.elfcore_object._main_object
         self.project = project
         return project
 
