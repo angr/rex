@@ -42,12 +42,12 @@ class HalfwayTracer(CrashTracer):
         return project
 
     def create_state(self, target, **kwargs):
-        self.project.loader.main_object = self.project.loader.elfcore_object
+        self.project.loader._main_object = self.project.loader.elfcore_object
         initial_state = self.project.factory.blank_state(
             mode='tracing',
             add_options=add_options,
             remove_options=remove_options)
-        self.project.loader.main_object = self.project.loader.elfcore_object._main_object
+        self.project.loader._main_object = self.project.loader.elfcore_object._main_object
         self.trace_bb_addr = initial_state.solver.eval(initial_state.regs.pc)
         initial_state.fs.mount('/', SimArchrMount(target))
         return initial_state
