@@ -275,7 +275,8 @@ class DumbTracer(CrashTracer):
         word_size = self.project.arch.bytes
 
         # we operate on concrete memory so far, so it is safe to load and eval concrete memory
-        data = crashing_state.solver.eval(crashing_state.memory.load(self._save_ip_addr, len(self.testcase)), cast_to=bytes)
+        sim_data = crashing_state.memory.load(self._save_ip_addr, len(self.testcase))
+        data = crashing_state.solver.eval(sim_data, cast_to=bytes)
         assert data[:word_size] in self.testcase, "PC is not overwritten!"
 
         # identify marker from the original input on stack
