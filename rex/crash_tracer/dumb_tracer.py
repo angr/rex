@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 l = logging.getLogger(__name__)
 
-DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x25, 0x26, 0x2b, 0x2d, 0x3b, 0xff]
+DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x24, 0x25, 0x26, 0x27, 0x2b, 0x2d, 0x3b, 0x3f, 0x5c, 0x7c, 0xff]
 
 class ASTTaint(SimplificationAvoidanceAnnotation):
     """
@@ -272,28 +272,29 @@ class DumbTracer(CrashTracer):
         self._save_ip_addr = self._get_saved_ip_addr(state)
 
         crashing_state = state
-
         word_size = self.project.arch.bytes
-        marker_size = word_size
 
         # we operate on concrete memory so far, so it is safe to load and eval concrete memory
-        data = crashing_state.solver.eval(crashing_state.memory.load(self._save_ip_addr, 0x100), cast_to=bytes)
+        sim_data = crashing_state.memory.load(self._save_ip_addr, len(self.testcase))
+        data = crashing_state.solver.eval(sim_data, cast_to=bytes)
+        assert data[:word_size] in self.testcase, "PC is not overwritten!"
 
         # identify marker from the original input on stack
-        for i in range(0, len(data), marker_size):
-            marker = data[i:i+marker_size]
-            if marker in self.testcase:
+        for marker_size in range(word_size, len(data)):
+            marker = data[:marker_size]
+            if marker not in self.testcase:
+                raise CrashTracerError("Fail to identify marker from the original input")
+            if self.testcase.count(marker) == 1:
                 break
         else:
-            raise CrashTracerError("Fail to identify marker from the original input")
+            raise CrashTracerError("The input should have high entropy, cyclic is recommended")
 
         marker_idx = self.testcase.index(marker)
-        assert self.testcase.count(marker) == 1, "The input should have high entropy, cyclic is recommended"
 
         #
         # we search forward and backward from `search_start` to find the maximum number of bytes that we control
         #
-        search_start = self._save_ip_addr + i
+        search_start = self._save_ip_addr
         search_start = crashing_state.solver.eval(search_start)
         obj = crashing_state.project.loader.find_object_containing(search_start)
 
@@ -425,7 +426,8 @@ class DumbTracer(CrashTracer):
 
         # prepare new input
         inp = bytes([bad_byte]*(self._max_len - (self._save_ip_addr - self._input_addr)))
-        taint_str = b'\xef\xbe\xad\xde\xbe\xba\xfe\xca'
+        # taint string should be something unique and not contain bad bytes
+        taint_str = b'DeAdB33F' # b'\xef\xbe\xad\xde\xbe\xba\xfe\xca'
 
         # prepare new actions
         new_actions = []
