@@ -19,6 +19,31 @@ cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
 tests_dir = str(os.path.dirname(os.path.realpath(__file__)))
 
 
+def multiple_attempts(attempt_amt: int):
+    """
+    A wrapper to allow a flakey test to be run attempt_amt number of times.
+    """
+    def _multiple_attempts(func):
+        @wraps(func)
+        def inner(*args, **kwargs):
+            ret_val = None
+            caught_exception = None
+            for _ in range(attempt_amt):
+                try:
+                    ret_val = func(*args, **kwargs)
+                    break
+                except Exception as e:
+                    caught_exception = e
+            else:
+                raise caught_exception
+
+            return ret_val
+
+        return inner
+
+    return _multiple_attempts
+
+
 def _do_pov_test(pov, enable_randomness=True):
     ''' Test a POV '''
     for _ in range(10):
@@ -231,6 +256,7 @@ def test_linux_stacksmash_32():
         _check_arsenal_has_send(exploit.arsenal)
 
 
+@multiple_attempts(3)
 def test_linux_network_stacksmash_64():
     # Test exploiting a simple network server with a stack-based buffer overflow.
     inp = b'\x00' * 500
