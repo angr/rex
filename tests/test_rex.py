@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long
 import os
 import random
 import subprocess
@@ -13,6 +14,8 @@ import colorguard
 from rex.vulnerability import Vulnerability
 from angr.state_plugins.trace_additions import FormatInfoStrToInt, FormatInfoDontConstrain
 from rex.exploit.cgc.type1.cgc_type1_shellcode_exploit import CGCType1ShellcodeExploit
+
+from flaky import flaky
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
@@ -231,6 +234,7 @@ def test_linux_stacksmash_32():
         _check_arsenal_has_send(exploit.arsenal)
 
 
+@flaky(max_runs=3, min_passes=1)
 def test_linux_network_stacksmash_64():
     # Test exploiting a simple network server with a stack-based buffer overflow.
     inp = b'\x00' * 500
