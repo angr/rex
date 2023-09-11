@@ -15,7 +15,7 @@ from rex.vulnerability import Vulnerability
 from angr.state_plugins.trace_additions import FormatInfoStrToInt, FormatInfoDontConstrain
 from rex.exploit.cgc.type1.cgc_type1_shellcode_exploit import CGCType1ShellcodeExploit
 
-from flakey import flakey
+from flaky import flaky
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))

@@ -22,7 +22,7 @@ setup(
         'povsim',
         'compilerex',
         'pwntools',
-        'flakey',
+        'flaky',
     ],
     package_data={
         'rex.scripter.templates': ['*.j2']
