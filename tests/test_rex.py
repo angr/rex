@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long
 import os
 import random
 import subprocess
@@ -14,34 +15,11 @@ from rex.vulnerability import Vulnerability
 from angr.state_plugins.trace_additions import FormatInfoStrToInt, FormatInfoDontConstrain
 from rex.exploit.cgc.type1.cgc_type1_shellcode_exploit import CGCType1ShellcodeExploit
 
+from flakey import flakey
+
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
 tests_dir = str(os.path.dirname(os.path.realpath(__file__)))
-
-
-def multiple_attempts(attempt_amt: int):
-    """
-    A wrapper to allow a flakey test to be run attempt_amt number of times.
-    """
-    def _multiple_attempts(func):
-        @wraps(func)
-        def inner(*args, **kwargs):
-            ret_val = None
-            caught_exception = None
-            for _ in range(attempt_amt):
-                try:
-                    ret_val = func(*args, **kwargs)
-                    break
-                except Exception as e:
-                    caught_exception = e
-            else:
-                raise caught_exception
-
-            return ret_val
-
-        return inner
-
-    return _multiple_attempts
 
 
 def _do_pov_test(pov, enable_randomness=True):
@@ -256,7 +234,7 @@ def test_linux_stacksmash_32():
         _check_arsenal_has_send(exploit.arsenal)
 
 
-@multiple_attempts(3)
+@flaky(max_runs=3, min_passes=1)
 def test_linux_network_stacksmash_64():
     # Test exploiting a simple network server with a stack-based buffer overflow.
     inp = b'\x00' * 500
