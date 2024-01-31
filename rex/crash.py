@@ -67,7 +67,7 @@ class BaseCrash:
             return
 
         # finally, create an angrop object
-        rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
+        rop = self.project.analyses.ROP(fast_mode=self._rop_fast_mode)
         rop.set_badbytes(self._bad_bytes)
         if self._rop_cache and self._rop_cache[0]:
             l.info("Loading rop gadgets from cache")
@@ -107,7 +107,7 @@ class BaseCrash:
         # finally, create an angrop object
         bin_opts = {"base_addr": base_addr}
         project = angr.Project(self.libc_binary, auto_load_libs=False, main_opts=bin_opts)
-        libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode, rebase=False)
+        libc_rop = project.analyses.ROP(fast_mode=self._rop_fast_mode)
         libc_rop.set_badbytes(self._bad_bytes)
         if self._rop_cache and self._rop_cache[1]:
             l.info("Loading libc rop gadgets from cache")
