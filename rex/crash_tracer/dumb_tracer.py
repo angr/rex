@@ -65,7 +65,7 @@ class DumbTracer(CrashTracer):
         # create a project
         self._init_angr_project_bow(self.tracer_bow.target)
         project = self.angr_project_bow.fire(core_path=r.core_path)
-        project.loader.main_object = project.loader.elfcore_object
+        project.loader._main_object = project.loader.elfcore_object
         state = project.factory.blank_state(
             mode='tracing',
             add_options=add_options
@@ -169,7 +169,7 @@ class DumbTracer(CrashTracer):
         # likely because of memory access
         self._init_angr_project_bow(self.tracer_bow.target)
         project = self.angr_project_bow.fire(core_path=r.core_path)
-        project.loader.main_object = project.loader.elfcore_object
+        project.loader._main_object = project.loader.elfcore_object
         if project.loader.find_object_containing(r.crash_address):
             if investigate:
                 return self._investigate_crash(r, testcase, channel, pre_fire_hook, delay=delay)
@@ -207,17 +207,17 @@ class DumbTracer(CrashTracer):
         self._init_angr_project_bow(target)
         project = self.angr_project_bow.fire(core_path=self.trace_result.halfway_core_path)
 
-        project.loader.main_object = project.loader.elfcore_object._main_object
+        project.loader._main_object = project.loader.elfcore_object._main_object
         self.project = project
         return project
 
     def create_state(self, target, **kwargs):
-        self.project.loader.main_object = self.project.loader.elfcore_object
+        self.project.loader._main_object = self.project.loader.elfcore_object
         initial_state = self.project.factory.blank_state(
             mode='tracing',
             add_options=add_options,
             remove_options=remove_options)
-        self.project.loader.main_object = self.project.loader.elfcore_object._main_object
+        self.project.loader._main_object = self.project.loader.elfcore_object._main_object
         initial_state.fs.mount('/', SimArchrMount(target))
         self._initial_state = initial_state.copy()
         return initial_state
@@ -484,7 +484,7 @@ class DumbTracer(CrashTracer):
         dsb = archr.arsenal.DataScoutBow(crash.target, analyzer=self.tracer_bow)
         angr_project_bow = archr.arsenal.angrProjectBow(crash.target, dsb)
         project = angr_project_bow.fire(core_path=r.halfway_core_path)
-        project.loader.main_object = project.loader.elfcore_object._main_object
+        project.loader._main_object = project.loader.elfcore_object._main_object
 
         # if the new actions have the same behavior as before, that means there are
         # no bad bytes in it
