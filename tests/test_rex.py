@@ -200,8 +200,7 @@ def test_linux_stacksmash_64():
     ld_path = os.path.join(lib_path, "ld-linux-x86-64.so.2")
     path = os.path.join(lib_path, "vuln_stacksmash")
     with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='x86_64').build().start() as target:
-        crash = rex.Crash(target, crash=inp, fast_mode=True,
-            rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_64'), aslr=False)
+        crash = rex.Crash(target, crash=inp, fast_mode=True, use_rop=False, aslr=False)
 
         exploit = crash.exploit(blacklist_techniques={'ret2libc'})
 
@@ -246,9 +245,8 @@ def test_linux_network_stacksmash_64():
                                    target_arch='x86_64',
                                    ipv4_address="127.0.0.1",
                                    tcp_ports=(port,)).build().start() as target:
-        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, 'network_overflow_64'),
-            aslr=False,
-            input_type=rex.enums.CrashInputType.TCP, port=port)
+        crash = rex.Crash(target, crash=inp, use_rop=False, aslr=False,
+                input_type=rex.enums.CrashInputType.TCP, port=port)
 
         exploit = crash.exploit(cmd=b"echo hello", blacklist_techniques={'ret2libc'})
 
