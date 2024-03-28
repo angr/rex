@@ -71,6 +71,10 @@ class DumbTracer(CrashTracer):
             add_options=add_options
             )
 
+        proc = project.hooked_by(state.addr)
+        if proc is not None:
+            raise CrashTracerError(f"Cannot investigate crash inside {proc}")
+
         # taint the registers and then step one single instruction which is the crashing instruction
         # then we can use the taint to infer which register caused the crash
         # This assumes that the register value directly comes from the input
@@ -82,6 +86,8 @@ class DumbTracer(CrashTracer):
 
         # step 2: step one single instruction
         block = state.block()
+        if block.size == 0 and block.vex.jumpkind == 'Ijk_NoDecode':
+            raise CrashTracerError(f"Crash seems to be at an undecodable instruction ({block.addr:#x})")
         insn = block.capstone.insns[0]
         insn_end = block.addr + insn.insn.size
         simgr = project.factory.simgr(state)
@@ -94,7 +100,7 @@ class DumbTracer(CrashTracer):
             if act.type == 'mem':
                 break
         else:
-            raise CrashTracerError("There is no memory access in the last instruction" +
+            raise CrashTracerError("There is no memory access in the last instruction, " +
                                    "why does it crash?")
         for ast in act.addr.ast.leaf_asts():
             if ast.annotations:
