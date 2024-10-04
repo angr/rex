@@ -1239,7 +1239,7 @@ class Crash(CommCrash):
             if any(v.startswith('cgc-flag') or v.startswith("random") for v in list(c.variables)):
                 concrete = next(a for a in c.args if not a.symbolic)
                 symbolic = next(a for a in c.args if a.symbolic)
-                replace_dict[symbolic.cache_key] = concrete
+                replace_dict[symbolic.hash()] = concrete
         cons = state.solver.constraints
         new_cons = []
         for c in cons:
