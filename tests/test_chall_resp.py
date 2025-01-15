@@ -57,7 +57,6 @@ def test_chall_response():
         for e in exploit_f.leakers:
             assert _do_pov_test(e)
 
-@flaky.flaky(3, 1)
 def test_chall_resp_rand():
     inp = b" (((" \
           b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
@@ -80,6 +79,7 @@ def run_all():
     functions = globals()
     all_functions = dict(filter((lambda kv: kv[0].startswith('test_')), functions.items()))
     for f in sorted(all_functions.keys()):
+        print(f)
         if hasattr(all_functions[f], '__call__'):
             all_functions[f]()
 
