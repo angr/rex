@@ -112,6 +112,8 @@ class BaseCrash:
         if self._rop_cache and self._rop_cache[1]:
             l.info("Loading libc rop gadgets from cache")
             libc_rop._load_cache_tuple(self._rop_cache[1])
+            for g in libc_rop._all_gadgets:
+                g.project = self.project
         else:
             l.info("Collecting ROP gadgets in libc... don't panic if you see tons of error messages!")
             l.info("It may take several minutes to finish...")
@@ -128,6 +130,13 @@ class BaseCrash:
             return
         with open(self._rop_cache_path, "rb") as f:
             self._rop_cache = pickle.load(f)
+        gadgets = []
+        if self._rop_cache[0]:
+            gadgets += self._rop_cache[0][0]
+        if self._rop_cache[1]:
+            gadgets += self._rop_cache[1][0]
+        for g in gadgets:
+            g.project = self.project
 
     def soft_save_cache(self):
         if not self._rop_cache_path:
@@ -138,8 +147,19 @@ class BaseCrash:
         rop_cache_tuple = self.rop._get_cache_tuple() if self.rop else None
         libc_rop_cache_tuple = self.libc_rop._get_cache_tuple() if self.libc_rop else None
         rop_cache = (rop_cache_tuple, libc_rop_cache_tuple)
+
+        gadgets = []
+        if rop_cache[0]:
+            gadgets += rop_cache[0][0]
+        if rop_cache[1]:
+            gadgets += rop_cache[1][0]
+
+        for g in gadgets:
+            g.project = None
         with open(self._rop_cache_path, "wb") as f:
             pickle.dump(rop_cache, f)
+        for g in gadgets:
+            g.project = self.project
 
     @staticmethod
     def _get_cache_path(binary):

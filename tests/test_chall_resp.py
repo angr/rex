@@ -1,14 +1,14 @@
-import rex
+import os
+import logging
+
 import angr
 import archr
-import flaky
 from angr.state_plugins.trace_additions import FormatInfoIntToStr, FormatInfoStrToInt
+import rex
 
-import os
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 cache_location = str(os.path.join(bin_location, 'tests_data/rop_gadgets_cache'))
 
-import logging
 
 def _do_pov_test(pov, enable_randomness=True):
     """ Test a POV """
@@ -32,7 +32,8 @@ def break_chall_resp_atoi():
     f1 = FormatInfoIntToStr(addr=itoa_addr, func_name="itoa", int_arg_num=1, str_dst_num=0, base=10, base_arg=None)
     f2 = FormatInfoStrToInt(addr=atoi_addr, func_name="atoi", str_arg_num=0, base=10, base_arg=None,
                             allows_negative=True)
-    crash = rex.Crash(bin_path, crash=crash_input, format_infos=[f1, f2], rop_cache_path=os.path.join(cache_location, "chall_resp_atoi"))
+    crash = rex.Crash(bin_path, crash=crash_input, format_infos=[f1, f2],
+                      rop_cache_path=os.path.join(cache_location, "chall_resp_atoi"))
     exploit_f = crash.exploit()
     for e in exploit_f.register_setters:
         assert _do_pov_test(e)
@@ -48,7 +49,8 @@ def test_chall_response():
     path = bin_location + "/tests/cgc/overflow_after_challenge_response2"
 
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
-        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, "overflow_after_challenge_response2"))
+        crash = rex.Crash(target, crash=inp,
+                          rop_cache_path=os.path.join(cache_location, "overflow_after_challenge_response2"))
         exploit_f = crash.exploit()
         crash.project.loader.close()
 
@@ -57,7 +59,6 @@ def test_chall_response():
         for e in exploit_f.leakers:
             assert _do_pov_test(e)
 
-@flaky.flaky(3, 1)
 def test_chall_resp_rand():
     inp = b" (((" \
           b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
@@ -66,7 +67,8 @@ def test_chall_resp_rand():
     path = bin_location + "/tests/cgc/overflow_after_chall_resp_rand"
 
     with archr.targets.LocalTarget([path], target_os='cgc') as target:
-        crash = rex.Crash(target, crash=inp, rop_cache_path=os.path.join(cache_location, "overflow_after_chall_resp_rand"))
+        crash = rex.Crash(target, crash=inp,
+                          rop_cache_path=os.path.join(cache_location, "overflow_after_chall_resp_rand"))
         exploit_f = crash.exploit()
         crash.project.loader.close()
 
@@ -78,8 +80,9 @@ def test_chall_resp_rand():
 
 def run_all():
     functions = globals()
-    all_functions = dict(filter((lambda kv: kv[0].startswith('test_')), functions.items()))
+    all_functions = {k:v for k,v in functions.items() if k.startswith("test_")}
     for f in sorted(all_functions.keys()):
+        print(f)
         if hasattr(all_functions[f], '__call__'):
             all_functions[f]()
 
