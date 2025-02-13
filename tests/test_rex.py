@@ -220,7 +220,7 @@ def test_linux_stacksmash_32():
     path = os.path.join(lib_path, "vuln_stacksmash")
     with archr.targets.LocalTarget([ld_path, '--library-path', lib_path, path], path, target_arch='i386').build().start() as target:
         crash = rex.Crash(target, inp, fast_mode=True,
-            rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash'))
+            rop_cache_path=os.path.join(cache_location, 'vuln_stacksmash_32'))
 
         exploit = crash.exploit(blacklist_techniques={'rop_leak_memory', 'rop_set_register', 'ret2libc'})
 
