@@ -199,7 +199,8 @@ class SimCrash(BaseCrash):
         assert self.project is not None
 
         if self.is_cgc:
-            self.project.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
+            simlib = angr.SIM_LIBRARIES['cgcabi_tracer']
+            self.project.simos.syscall_library.update(simlib[0] if isinstance(simlib, list) else simlib)
 
         # Load cached/intermediate states
         if self._crash_state is not None and self._prev_state is not None:
