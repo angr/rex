@@ -1,12 +1,29 @@
-name: CI
+name: Test
 
 on:
   push:
     branches:
-    - "master"
+      - master
   pull_request:
   workflow_dispatch:
 
 jobs:
-  ci:
-    uses: angr/ci-settings/.github/workflows/angr-ci.yml@master
+  test:
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.13"]
+      fail-fast: false
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - run: uv sync --dev
+      - run: uv run pytest

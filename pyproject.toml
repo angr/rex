@@ -1,3 +1,35 @@
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "rex"
+version = "0.02"
+dependencies = [
+    "angr",
+    "archr",
+    "angrop",
+    "jinja2",
+    "tracer",
+    "povsim",
+    "compilerex",
+    "pwntools",
+]
+
+[tool.setuptools.package-data]
+"rex.scripter.templates" = ["*.j2"]
+
+[dependency-groups]
+dev = [
+    "flaky",
+    "pytest",
+    "pytest-xdist",
+]
+
+[tool.uv.sources]
+angr = { git = "https://github.com/angr/angr.git" }
+archr = { git = "https://github.com/angr/archr.git" }
+angrop = { git = "https://github.com/angr/angrop.git" }
+tracer = { git = "https://github.com/angr/tracer.git" }
+povsim = { git = "https://github.com/mechaphish/povsim.git" }
+compilerex = { git = "https://github.com/mechaphish/compilerex.git" }
