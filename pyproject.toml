@@ -1,3 +1,21 @@
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "rex"
+version = "0.02"
+dependencies = [
+    "angr",
+    "archr",
+    "angrop",
+    "jinja2",
+    "tracer",
+    "povsim",
+    "compilerex",
+    "pwntools",
+    "flaky",
+]
+
+[tool.setuptools.package-data]
+"rex.scripter.templates" = ["*.j2"]
