@@ -8,6 +8,8 @@ import time
 import struct
 import logging
 
+import pytest
+
 import archr
 import rex
 import colorguard
@@ -387,6 +389,8 @@ def test_arbitrary_transmit_no_crash():
 
     _do_arbitrary_transmit_test_for("tests/i386/arbitrary_transmit_no_crash")
 
+
+@pytest.mark.slow
 def test_reconstraining():
     # Test our ability to reconstrain
 
