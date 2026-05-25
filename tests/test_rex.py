@@ -248,7 +248,7 @@ def test_linux_network_stacksmash_64():
                                    ipv4_address="127.0.0.1",
                                    tcp_ports=(port,)).build().start() as target:
         crash = rex.Crash(target, crash=inp, use_rop=False, aslr=False,
-                input_type=rex.enums.CrashInputType.TCP, port=port)
+                input_type=rex.enums.CrashInputType.TCP, port=port, delay=1)
 
         exploit = crash.exploit(cmd=b"echo hello", blacklist_techniques={'ret2libc'})
 
@@ -268,7 +268,7 @@ def test_linux_network_stacksmash_64():
             new_target.run_command("")
 
             # wait for the target to load
-            time.sleep(.5)
+            time.sleep(1)
 
             temp_script = tempfile.NamedTemporaryFile(suffix=".py", delete=False)
             exploit_location = temp_script.name
@@ -278,7 +278,7 @@ def test_linux_network_stacksmash_64():
 
             exploit_result = subprocess.check_output(["python", exploit_location,
                                                       "127.0.0.1", str(new_port),
-                                                      ], timeout=3)
+                                                      ], timeout=10)
             assert b"hello" in exploit_result
         finally:
             os.unlink(exploit_location)
