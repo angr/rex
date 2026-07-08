@@ -9,7 +9,7 @@ from multiprocessing import Pool
 from functools import reduce
 
 from angrop import rop_utils
-import claripy
+from angr import claripy
 from cle import CLEError
 from povsim import CGCPovSimulator
 import angr

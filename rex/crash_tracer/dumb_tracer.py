@@ -6,13 +6,13 @@ from typing import List, Tuple, TYPE_CHECKING
 
 import nclib
 import archr
-import claripy
+from angr import claripy
 from tracer import TinyCore
 from archr.analyzers.angr_state import SimArchrMount
 from archr.analyzers.qemu_tracer import QEMUTracerError
 from angr.storage.file import SimFileDescriptorDuplex
 from cle.backends import ELFCore
-from claripy.annotation import SimplificationAvoidanceAnnotation
+from angr.claripy.annotation import SimplificationAvoidanceAnnotation
 
 from . import CrashTracer, CrashTracerError, add_options, remove_options
 from ..enums import CrashInputType

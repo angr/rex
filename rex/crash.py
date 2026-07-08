@@ -8,7 +8,7 @@ import operator
 import pickle
 
 import archr
-import claripy
+from angr import claripy
 from tracer import TracerPoV
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
