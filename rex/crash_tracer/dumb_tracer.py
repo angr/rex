@@ -12,7 +12,6 @@ from archr.analyzers.angr_state import SimArchrMount
 from archr.analyzers.qemu_tracer import QEMUTracerError
 from angr.storage.file import SimFileDescriptorDuplex
 from cle.backends import ELFCore
-from angr.claripy.annotation import SimplificationAvoidanceAnnotation
 
 from . import CrashTracer, CrashTracerError, add_options, remove_options
 from ..enums import CrashInputType
@@ -25,7 +24,7 @@ l = logging.getLogger(__name__)
 
 DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x24, 0x25, 0x26, 0x27, 0x2b, 0x2d, 0x3b, 0x3f, 0x5c, 0x7c, 0xff]
 
-class ASTTaint(SimplificationAvoidanceAnnotation):
+class ASTTaint(claripy.annotation.SimplificationAvoidanceAnnotation):
     """
     A dummy taint for input-to-state analysis
     """
