@@ -185,8 +185,9 @@ class Type2CrashFuzzer(object):
         # if we have an ast fix it!
         out_val = self.addr_ast
         reg_vals2 = {self._reg_asts[r]: claripy.BVV(v, 32) for r, v in reg_vals.items() if r in CGC_GENERAL_REGS}
-        replace_dict = {a.hash(): b for a, b in reg_vals2.items()}
-        out_val = out_val.replace_dict(replace_dict)
+        # clarirs has no replace_dict; apply claripy.replace per register AST.
+        for old_ast, new_val in reg_vals2.items():
+            out_val = claripy.replace(out_val, old_ast, new_val)
         if out_val.symbolic:
             raise CannotExploit("symbolic value after replacing regs")
         return {"AST": out_val.args[0], "eip": reg_vals["eip"]}
