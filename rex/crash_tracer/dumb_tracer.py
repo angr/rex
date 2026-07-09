@@ -24,7 +24,9 @@ l = logging.getLogger(__name__)
 
 DANGEROUS_BYTES = [0x00, 0x0a, 0x20, 0x24, 0x25, 0x26, 0x27, 0x2b, 0x2d, 0x3b, 0x3f, 0x5c, 0x7c, 0xff]
 
-class ASTTaint(claripy.annotation.SimplificationAvoidanceAnnotation):
+SimplificationAvoidanceAnnotation = claripy.annotation.SimplificationAvoidanceAnnotation
+
+class ASTTaint(SimplificationAvoidanceAnnotation):
     """
     A dummy taint for input-to-state analysis
     """
