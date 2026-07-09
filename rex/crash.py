@@ -156,6 +156,7 @@ class BaseCrash:
 
         for g in gadgets:
             g.project = None
+        os.makedirs(os.path.dirname(self._rop_cache_path) or ".", exist_ok=True)
         with open(self._rop_cache_path, "wb") as f:
             pickle.dump(rop_cache, f)
         for g in gadgets:
