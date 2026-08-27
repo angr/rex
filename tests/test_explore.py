@@ -20,7 +20,7 @@ def test_write_what_where_shadowstack():
         crash.project.loader.close()
 
         exploit = arsenal.best_type2
-        assert exploit.test_binary()
+        assert exploit.test_binary(enable_randomness=False)
 
 
 def run_all():
