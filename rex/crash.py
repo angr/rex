@@ -8,7 +8,7 @@ import operator
 import pickle
 
 import archr
-import claripy
+from angr import claripy
 from tracer import TracerPoV
 from angr.state_plugins.trace_additions import ChallRespInfo, ZenPlugin
 from angr.state_plugins.preconstrainer import SimStatePreconstrainer
@@ -156,6 +156,7 @@ class BaseCrash:
 
         for g in gadgets:
             g.project = None
+        os.makedirs(os.path.dirname(self._rop_cache_path) or ".", exist_ok=True)
         with open(self._rop_cache_path, "wb") as f:
             pickle.dump(rop_cache, f)
         for g in gadgets:
@@ -1255,16 +1256,22 @@ class Crash(CommCrash):
 
         l.info("reconstraining flag")
 
-        replace_dict = dict()
+        # Map each symbolic leaf to its concrete replacement. claripy's
+        # replace_dict (keyed by AST hash) is not available in clarirs, so we
+        # apply claripy.replace for each pair; the replacements are symbolic
+        # leaves mapped to concrete values, so sequential replacement is safe.
+        replace_pairs = []
         for c in state.preconstrainer.preconstraints:
             if any(v.startswith('cgc-flag') or v.startswith("random") for v in list(c.variables)):
                 concrete = next(a for a in c.args if not a.symbolic)
                 symbolic = next(a for a in c.args if a.symbolic)
-                replace_dict[symbolic.hash()] = concrete
+                replace_pairs.append((symbolic, concrete))
         cons = state.solver.constraints
         new_cons = []
         for c in cons:
-            new_c = claripy.replace_dict(c, replace_dict)
+            new_c = c
+            for old, new_val in replace_pairs:
+                new_c = claripy.replace(new_c, old, new_val)
             new_cons.append(new_c)
         state.release_plugin("solver")
         state.add_constraints(*new_cons)
